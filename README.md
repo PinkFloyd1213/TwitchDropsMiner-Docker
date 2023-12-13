@@ -1,4 +1,54 @@
-# Twitch Drops Miner
+# Twitch Drops Miner - Docker Edition
+
+This project is an unofficial Dockerized fork of the Twitch Drop Miner. It is designed to make the original Twitch Drop Miner tool usable within a Docker environment, facilitating easier deployment and management.
+
+## Getting Started
+
+To use this Dockerized version of Twitch Drop Miner, you'll need to have Docker installed on your machine. Once Docker is set up, you can build and run the containerized application.
+
+### Building the Docker Image
+
+Clone the repository and navigate to the directory containing the Dockerfile. Run the following command to build the Docker image:
+
+```bash
+docker build -t twitch_drop_miner .
+```
+
+### Running the Container
+
+To run the container, use the following command:
+
+```bash
+docker run -e VNC_PASSWORD=yourpassword -p 5900:5900 twitch_drop_miner
+```
+
+Replace `yourpassword` with your desired VNC password. This password is required to connect to the VNC server running inside the container.
+
+### Connecting via VNC
+
+Once the container is running, you can connect to it using a VNC client:
+
+1. Open your VNC client.
+2. Connect to `localhost:5900` (or replace `localhost` with the Docker host's IP address if you're running Docker on a remote server).
+3. When prompted, enter the VNC password you set when starting the container.
+
+## Environment Variables
+
+- `VNC_PASSWORD`: This environment variable is used to set the password for the VNC server. If not specified, a default password (`twitch_miner`) will be used.
+
+## Notes
+
+- This project is an unofficial fork and is not officially associated with the original Twitch Drop Miner project.
+- The Dockerization of this project is intended to simplify deployment and usage but comes without any guarantees or official support.
+
+## License
+
+Please refer to the license of the original project. This Dockerized fork is subject to the same licensing.
+
+
+
+==================
+## Project Read Me
 
 This application allows you to AFK mine timed Twitch drops, without having to worry about switching channels when the one you were watching goes offline, claiming the drops, or even receiving the stream data itself. This helps both you and Twitch save on bandwidth and hassle. Everyone wins!
 
