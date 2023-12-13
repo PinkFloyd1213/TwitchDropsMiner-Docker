@@ -4,7 +4,7 @@ This project is an unofficial Dockerized fork of the Twitch Drop Miner. It is de
 
 ## Getting Started
 
-To use this Dockerized version of Twitch Drop Miner, you'll need to have Docker installed on your machine. Once Docker is set up, you can build and run the containerized application.
+To use this Dockerized version of Twitch Drop Miner, you'll need to have Docker installed on your machine. Once Docker is set up, you can build and run the containerized application. You can find a built image here: [Docker Hub](https://hub.docker.com/repository/docker/pinkfloyd1213/twitch_drop_miner)
 
 ### Building the Docker Image
 
