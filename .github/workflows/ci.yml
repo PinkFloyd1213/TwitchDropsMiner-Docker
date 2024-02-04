@@ -7,10 +7,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  PYTHON_VERSION: '3.10'
+
 jobs:
   windows:
     name: Windows
-    runs-on: windows-2022
+    runs-on: windows-latest
 
     steps:
       - name: Checkout code
@@ -24,17 +27,19 @@ jobs:
       - name: Append git revision to project version
         run: |
           (Get-Content version.py) `
-          -Replace '^__version__\s*=\s*"[^"]+', "`$0.${{ steps.vars.outputs.sha_short }}" |`
+          -Replace '^__version__\s*=\s*"[^"]+', "`$0.${{steps.vars.outputs.sha_short}}" |`
           Out-File version.py
 
-      - name: Set up Python virtual environment
-        run: |
-          python3 -m venv env
+      # Ensure Python version
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{env.PYTHON_VERSION}}
 
       - name: Install project dependencies
         run: |
-          .\env\Scripts\activate
-          python3 -m pip install wheel -r requirements.txt
+          python3 -m pip install wheel
+          python3 -m pip install -r requirements.txt
 
       - name: Install UPX
         run: |
@@ -45,12 +50,10 @@ jobs:
 
       - name: Install PyInstaller
         run: |
-          .\env\Scripts\activate
           python3 -m pip install pyinstaller
 
       - name: Create portable executable
         run: |
-          .\env\Scripts\activate
           pyinstaller build.spec
 
       - name: Create release folder
@@ -89,25 +92,20 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: ${{env.PYTHON_VERSION}}
 
       - name: Install system dependencies
         run: |
           sudo apt update
           sudo apt install gir1.2-appindicator3-0.1 libgirepository1.0-dev python3-tk
 
-      - name: Set up Python virtual environment
-        run: |
-          python3 -m venv env
-
       - name: Install project dependencies
         run: |
-          source ./env/bin/activate
-          python3 -m pip install wheel -r requirements.txt
+          python3 -m pip install wheel
+          python3 -m pip install -r requirements.txt
 
       - name: Install PyInstaller
         run: |
-          source ./env/bin/activate
           python3 -m pip install pyinstaller
 
       # NOTE: Remove this step if/once libxft gets updated to 2.3.5 or newer on Ubuntu 20.04, which currently has 2.3.3.
@@ -124,7 +122,6 @@ jobs:
 
       - name: Create portable executable
         run: |
-          source ./env/bin/activate
           LD_LIBRARY_PATH=/tmp/libXft/lib xvfb-run --auto-servernum pyinstaller build.spec
 
       - name: Show PyInstaller warnings
@@ -147,7 +144,7 @@ jobs:
 
   linux-appimage:
     name: Linux (AppImage)
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout code
@@ -161,7 +158,7 @@ jobs:
 
       - name: Append git revision to project version
         run: |
-          sed -ri "s/^__version__\s*=\s*\"[^\"]+/\0.${{ steps.vars.outputs.sha_short }}/" version.py
+          sed -ri "s/^__version__\s*=\s*\"[^\"]+/\0.${{steps.vars.outputs.sha_short}}/" version.py
 
       - name: Install system dependencies
         run: |
@@ -176,7 +173,8 @@ jobs:
       - name: Create AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
-          APP_VERSION: ${{ steps.vars.outputs.app_version }}.${{ steps.vars.outputs.sha_short }}
+          APP_VERSION: ${{steps.vars.outputs.app_version}}.${{steps.vars.outputs.sha_short}}
+          PYTHON_VERSION: ${{env.PYTHON_VERSION}}
         run: |
           ./appimage-builder --recipe appimage/AppImageBuilder.yml
 
@@ -201,7 +199,7 @@ jobs:
       - windows
       - linux-pyinstaller
       - linux-appimage
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
 
@@ -227,8 +225,8 @@ jobs:
             **⚠️ This build is not stable and may end up terminating with a fatal error. ⚠️**
             **Use at your own risk.**
 
-            - Last build date: `${{ steps.vars.outputs.date_now }}`
-            - Reference commit: ${{ github.sha }}
+            - Last build date: `${{steps.vars.outputs.date_now}}`
+            - Reference commit: ${{github.sha}}
           name: Development build
           prerelease: true
           removeArtifacts: true
