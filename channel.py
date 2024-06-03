@@ -9,7 +9,7 @@ from typing import Any, SupportsInt, TYPE_CHECKING
 
 from utils import invalidate_cache, json_minify, Game
 from exceptions import MinerException, RequestException
-from constants import BASE_URL, GQL_OPERATIONS, ONLINE_DELAY, URLType
+from constants import CALL, GQL_OPERATIONS, ONLINE_DELAY, URLType
 
 if TYPE_CHECKING:
     from twitch import Twitch
@@ -151,7 +151,7 @@ class Channel:
 
     @property
     def url(self) -> URLType:
-        return URLType(f"{BASE_URL}/{self._login}")
+        return URLType(f"{self._twitch._client_type.CLIENT_URL}/{self._login}")
 
     @property
     def iid(self) -> str:
@@ -223,30 +223,33 @@ class Channel:
         For mobile view, spade_url is available immediately from the page, skipping step #2.
         """
         SETTINGS_PATTERN: str = (
-            r'src="(https://static\.twitchcdn\.net/config/settings\.[0-9a-f]{32}\.js)"'
+            r'src="(https://[\w.]+/config/settings\.[0-9a-f]{32}\.js)"'
         )
         SPADE_PATTERN: str = (
             r'"spade_?url": ?"(https://video-edge-[.\w\-/]+\.ts(?:\?allow_stream=true)?)"'
         )
-        async with self._twitch.request("GET", self.url) as response:
-            streamer_html: str = await response.text(encoding="utf8")
+        async with self._twitch.request("GET", self.url) as response1:
+            streamer_html: str = await response1.text(encoding="utf8")
         match = re.search(SPADE_PATTERN, streamer_html, re.I)
         if not match:
             match = re.search(SETTINGS_PATTERN, streamer_html, re.I)
             if not match:
                 raise MinerException("Error while spade_url extraction: step #1")
             streamer_settings = match.group(1)
-            async with self._twitch.request("GET", streamer_settings) as response:
-                settings_js: str = await response.text(encoding="utf8")
+            async with self._twitch.request("GET", streamer_settings) as response2:
+                settings_js: str = await response2.text(encoding="utf8")
             match = re.search(SPADE_PATTERN, settings_js, re.I)
             if not match:
                 raise MinerException("Error while spade_url extraction: step #2")
         return URLType(match.group(1))
 
     async def get_stream(self) -> Stream | None:
-        response: JsonType = await self._twitch.gql_request(
-            GQL_OPERATIONS["GetStreamInfo"].with_variables({"channel": self._login})
-        )
+        try:
+            response: JsonType = await self._twitch.gql_request(
+                GQL_OPERATIONS["GetStreamInfo"].with_variables({"channel": self._login})
+            )
+        except MinerException as exc:
+            raise MinerException(f"Channel: {self._login}") from exc
         stream_data: JsonType | None = response["data"]["user"]
         if not stream_data:
             return None
@@ -256,13 +259,18 @@ class Channel:
         if not stream_data["stream"]:
             return None
         stream = Stream.from_get_stream(self, stream_data)
-        available_drops: JsonType = await self._twitch.gql_request(
-            GQL_OPERATIONS["AvailableDrops"].with_variables({"channelID": str(self.id)})
-        )
-        stream.drops_enabled = any(
-            bool(c["timeBasedDrops"])
-            for c in (available_drops["data"]["channel"]["viewerDropCampaigns"] or [])
-        )
+        if not stream.drops_enabled:
+            try:
+                available_drops: JsonType = await self._twitch.gql_request(
+                    GQL_OPERATIONS["AvailableDrops"].with_variables({"channelID": str(self.id)})
+                )
+            except MinerException:
+                logger.log(CALL, f"AvailableDrops GQL call failed for channel: {self._login}")
+            else:
+                stream.drops_enabled = any(
+                    bool(c["timeBasedDrops"])
+                    for c in (available_drops["data"]["channel"]["viewerDropCampaigns"] or [])
+                )
         return stream
 
     async def update_stream(self, *, trigger_events: bool) -> bool:
