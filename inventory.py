@@ -131,6 +131,14 @@ class BaseDrop:
     def update_claim(self, claim_id: str):
         self.claim_id = claim_id
 
+    async def generate_claim(self) -> None:
+        # claim IDs now appear to be constructed from other IDs we have access to
+        # Format: UserID#CampaignID#DropID
+        # NOTE: This marks a drop as a ready-to-claim, so we may want to later ensure
+        # its mining progress is finished first
+        auth_state = await self.campaign._twitch.get_auth()
+        self.claim_id = f"{auth_state.user_id}#{self.campaign.id}#{self.id}"
+
     def rewards_text(self, delim: str = ", ") -> str:
         return delim.join(benefit.name for benefit in self.benefits)
 
@@ -177,12 +185,10 @@ class TimedDrop(BaseDrop):
         super().__init__(campaign, data, claimed_benefits)
         self._manager: GUIManager = self._twitch.gui
         self._gui_inv: InventoryOverview = self._manager.inv
-        self.current_minutes: int = 0
-        if "self" in data:
-            self.current_minutes = data["self"]["currentMinutesWatched"]
+        self.current_minutes: int = "self" in data and data["self"]["currentMinutesWatched"] or 0
         self.required_minutes: int = data["requiredMinutesWatched"]
         if self.is_claimed:
-            # claimed drops report 0 current minutes, so we need to make a correction
+            # claimed drops may report inconsistent current minutes, so we need to overwrite them
             self.current_minutes = self.required_minutes
 
     def __repr__(self) -> str:
@@ -216,7 +222,14 @@ class TimedDrop(BaseDrop):
 
     @cached_property
     def progress(self) -> float:
+        if self.current_minutes <= 0 or self.required_minutes <= 0:
+            return 0.0
+        elif self.current_minutes >= self.required_minutes:
+            return 1.0
         return self.current_minutes / self.required_minutes
+
+    def _base_can_earn(self) -> bool:
+        return self.required_minutes > 0 and super()._base_can_earn()
 
     def _on_claim(self) -> None:
         result = super()._on_claim()
@@ -235,8 +248,14 @@ class TimedDrop(BaseDrop):
         return result
 
     def update_minutes(self, minutes: int):
-        self.current_minutes = minutes
+        if minutes < 0:
+            return
+        elif minutes <= self.required_minutes:
+            self.current_minutes = minutes
+        else:
+            self.current_minutes = self.required_minutes
         self._on_minutes_changed()
+        self.display()
 
     def display(self, *, countdown: bool = True, subone: bool = False):
         self._manager.display_drop(self, countdown=countdown, subone=subone)
@@ -245,6 +264,7 @@ class TimedDrop(BaseDrop):
         if self.current_minutes < self.required_minutes:
             self.current_minutes += 1
             self._on_minutes_changed()
+        self.display()
 
 
 class DropsCampaign:

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import re
-import sys
 import json
 import asyncio
 import logging
 from time import time
+from copy import deepcopy
 from itertools import chain
 from functools import partial
 from collections import abc, deque, OrderedDict
@@ -13,26 +12,8 @@ from datetime import datetime, timedelta, timezone
 from contextlib import suppress, asynccontextmanager
 from typing import Any, Literal, Final, NoReturn, overload, cast, TYPE_CHECKING
 
-if sys.platform == "win32":
-    from subprocess import CREATE_NO_WINDOW
-
 import aiohttp
 from yarl import URL
-try:
-    from seleniumwire.request import Request
-    from selenium.common.exceptions import WebDriverException
-    from seleniumwire.undetected_chromedriver import Chrome, ChromeOptions
-except ModuleNotFoundError:
-    # the dependencies weren't installed, but they're not used either, so skip them
-    pass
-except ImportError as exc:
-    if "_brotli" in exc.msg:
-        raise ImportError(
-            "You need to install Visual C++ Redist (x86 and x64): "
-            "https://support.microsoft.com/en-gb/help/2977003/"
-            "the-latest-supported-visual-c-downloads"
-        ) from exc
-    raise
 
 from translate import _
 from gui import GUIManager
@@ -40,12 +21,14 @@ from channel import Channel
 from websocket import WebsocketPool
 from inventory import DropsCampaign
 from exceptions import (
-    MinerException,
-    CaptchaRequired,
     ExitRequest,
-    LoginException,
+    GQLException,
     ReloadRequest,
+    LoginException,
+    MinerException,
     RequestInvalid,
+    CaptchaRequired,
+    RequestException,
 )
 from utils import (
     CHARS_HEX_LOWER,
@@ -53,16 +36,16 @@ from utils import (
     timestamp,
     create_nonce,
     task_wrapper,
-    first_to_complete,
     OrderedSet,
     AwaitableValue,
     ExponentialBackoff,
 )
 from constants import (
     CALL,
+    DUMP_PATH,
     COOKIES_PATH,
-    GQL_OPERATIONS,
     MAX_CHANNELS,
+    GQL_OPERATIONS,
     WATCH_INTERVAL,
     State,
     ClientType,
@@ -89,7 +72,6 @@ class SkipExtraJsonDecoder(json.JSONDecoder):
         return obj
 
 
-# CLIENT_URL, CLIENT_ID, USER_AGENT = ClientType.MOBILE_WEB
 SAFE_LOADS = lambda s: json.loads(s, cls=SkipExtraJsonDecoder)
 
 
@@ -103,15 +85,6 @@ class _AuthState:
         self.session_id: str
         self.access_token: str
         self.client_version: str
-        self.integrity_token: str
-        self.integrity_expires: datetime
-
-    @property
-    def integrity_expired(self) -> bool:
-        return (
-            not hasattr(self, "integrity_expires")
-            or datetime.now(timezone.utc) >= self.integrity_expires
-        )
 
     def _hasattrs(self, *attrs: str) -> bool:
         return all(hasattr(self, attr) for attr in attrs)
@@ -128,146 +101,8 @@ class _AuthState:
             "session_id",
             "access_token",
             "client_version",
-            "integrity_token",
-            "integrity_expires",
         )
         self._logged_in.clear()
-
-    def interceptor(self, request: Request) -> None:
-        if (
-            request.method == "POST"
-            and request.url == "https://passport.twitch.tv/protected_login"
-        ):
-            body = request.body.decode("utf-8")
-            data = json.loads(body)
-            data["client_id"] = self._twitch._client_type.CLIENT_ID
-            request.body = json.dumps(data).encode("utf-8")
-            del request.headers["Content-Length"]
-            request.headers["Content-Length"] = str(len(request.body))
-
-    async def _chrome_login(self) -> None:
-        gui_print = self._twitch.gui.print
-        login_form: LoginForm = self._twitch.gui.login
-        coro_unless_closed = self._twitch.gui.coro_unless_closed
-
-        # open the chrome browser on the Twitch's login page
-        # use a separate executor to void blocking the event loop
-        loop = asyncio.get_running_loop()
-        driver: Chrome | None = None
-        while True:
-            gui_print(_("login", "chrome", "startup"))
-            try:
-                version_main = None
-                for attempt in range(2):
-                    options = ChromeOptions()
-                    options.add_argument("--log-level=3")
-                    options.add_argument("--disable-web-security")
-                    options.add_argument("--allow-running-insecure-content")
-                    options.add_argument("--lang=en")
-                    options.add_argument("--disable-gpu")
-                    options.set_capability("pageLoadStrategy", "eager")
-                    try:
-                        wire_options: dict[str, Any] = {"proxy": {}}
-                        if self._twitch.settings.proxy:
-                            wire_options["proxy"]["http"] = str(self._twitch.settings.proxy)
-                        driver_coro = loop.run_in_executor(
-                            None,
-                            lambda: Chrome(
-                                options=options,
-                                no_sandbox=True,
-                                suppress_welcome=True,
-                                version_main=version_main,
-                                seleniumwire_options=wire_options,
-                                service_creationflags=CREATE_NO_WINDOW,
-                            )
-                        )
-                        driver = await coro_unless_closed(driver_coro)
-                        break
-                    except WebDriverException as exc:
-                        message = exc.msg
-                        if (
-                            message is not None
-                            and (
-                                match := re.search(
-                                    (
-                                        r'Chrome version ([\d]+)\n'
-                                        r'Current browser version is ((\d+)\.[\d.]+)'
-                                    ),
-                                    message,
-                                )
-                            ) is not None
-                        ):
-                            if not attempt:
-                                version_main = int(match.group(3))
-                                continue
-                            else:
-                                raise MinerException(
-                                    "Your Chrome browser is out of date\n"
-                                    f"Required version: {match.group(1)}\n"
-                                    f"Current version: {match.group(2)}"
-                                ) from None
-                        raise MinerException(
-                            "An error occured while boostrapping the Chrome browser"
-                        ) from exc
-                assert driver is not None
-                driver.request_interceptor = self.interceptor
-                # driver.set_page_load_timeout(30)
-                # page_coro = loop.run_in_executor(None, driver.get, "https://twitch.tv")
-                # await coro_unless_closed(page_coro)
-                page_coro = loop.run_in_executor(None, driver.get, "https://twitch.tv/login")
-                await coro_unless_closed(page_coro)
-
-                # auto login
-                # if login_data.username and login_data.password:
-                #     driver.find_element("id", "login-username").send_keys(login_data.username)
-                #     driver.find_element("id", "password-input").send_keys(login_data.password)
-                #     driver.find_element(
-                #         "css selector", '[data-a-target="passport-login-button"]'
-                #     ).click()
-                # token submit button css selectors
-                # Button: "screen="two_factor" target="submit_button"
-                # Input: <input type="text" autocomplete="one-time-code" data-a-target="tw-input"
-                # inputmode="numeric" pattern="[0-9]*" value="">
-
-                # wait for the user to navigate away from the URL, indicating successful login
-                # alternatively, they can press on the login button again
-                async def url_waiter(driver=driver):
-                    while driver.current_url != "https://www.twitch.tv/?no-reload=true":
-                        await asyncio.sleep(0.5)
-
-                gui_print(_("login", "chrome", "login_to_complete"))
-                await first_to_complete([
-                    url_waiter(),
-                    coro_unless_closed(login_form.wait_for_login_press()),
-                ])
-
-                # cookies = [
-                #     {
-                #         "domain": ".twitch.tv",
-                #         "expiry": 1700000000,
-                #         "httpOnly": False,
-                #         "name": "auth-token",
-                #         "path": "/",
-                #         "sameSite": "None",
-                #         "secure": True,
-                #         "value": "..."
-                #     },
-                #     ...,
-                # ]
-                cookies = driver.get_cookies()
-                for cookie in cookies:
-                    if "twitch.tv" in cookie["domain"] and cookie["name"] == "auth-token":
-                        self.access_token = cookie["value"]
-                        break
-                else:
-                    gui_print(_("login", "chrome", "no_token"))
-            except WebDriverException:
-                gui_print(_("login", "chrome", "closed_window"))
-            finally:
-                if driver is not None:
-                    driver.quit()
-                    driver = None
-            await coro_unless_closed(login_form.wait_for_login_press())
 
     async def _oauth_login(self) -> str:
         login_form: LoginForm = self._twitch.gui.login
@@ -482,11 +317,9 @@ class _AuthState:
 
         if hasattr(self, "access_token"):
             return self.access_token
-        raise MinerException("Login flow finished without setting the access token")
+        raise LoginException("Login flow finished without setting the access token")
 
-    def headers(
-        self, *, user_agent: str = '', gql: bool = False, integrity: bool = False
-    ) -> JsonType:
+    def headers(self, *, user_agent: str = '', gql: bool = False) -> JsonType:
         client_info: ClientInfo = self._twitch._client_type
         headers = {
             "Accept": "*/*",
@@ -508,8 +341,6 @@ class _AuthState:
             headers["Origin"] = str(client_info.CLIENT_URL)
             headers["Referer"] = str(client_info.CLIENT_URL)
             headers["Authorization"] = f"OAuth {self.access_token}"
-        if integrity:
-            headers["Client-Integrity"] = self.integrity_token
         return headers
 
     async def validate(self):
@@ -568,7 +399,7 @@ class _AuthState:
             else:
                 raise RuntimeError("Login verification failure")
             if validate_response["client_id"] != client_info.CLIENT_ID:
-                raise MinerException("You're using an old cookie file, please generate a new one.")
+                raise LoginException("You're using an old cookie file, please generate a new one.")
             self.user_id = int(validate_response["user_id"])
             cookie["persistent"] = str(self.user_id)
             logger.info(f"Login successful, user ID: {self.user_id}")
@@ -576,39 +407,10 @@ class _AuthState:
             # update our cookie and save it
             jar.update_cookies(cookie, client_info.CLIENT_URL)
             jar.save(COOKIES_PATH)
-        # if not self._hasattrs("integrity_token") or self.integrity_expired:
-        #     async with self._twitch.request(
-        #         "POST",
-        #         "https://gql.twitch.tv/integrity",
-        #         headers=self.gql_headers(integrity=False)
-        #     ) as response:
-        #         self._last_request = datetime.now(timezone.utc)
-        #         response_json: JsonType = await response.json()
-        #     self.integrity_token = cast(str, response_json["token"])
-        #     now = datetime.now(timezone.utc)
-        #     expiration = datetime.fromtimestamp(response_json["expiration"] / 1000, timezone.utc)
-        #     self.integrity_expires = ((expiration - now) * 0.9) + now
-        #     # verify the integrity token's contents for the "is_bad_bot" flag
-        #     stripped_token: str = self.integrity_token.split('.')[2] + "=="
-        #     messy_json: str = urlsafe_b64decode(stripped_token.encode()).decode(errors="ignore")
-        #     match = re.search(r'(.+)(?<="}).+$', messy_json)
-        #     if match is None:
-        #         raise MinerException("Unable to parse the integrity token")
-        #     decoded_header: JsonType = json.loads(match.group(1))
-        #     if decoded_header.get("is_bad_bot", "false") != "false":
-        #         self._twitch.print(
-        #             "Twitch has detected this miner as a \"Bad Bot\". "
-        #             "You're proceeding at your own risk!"
-        #         )
-        #         await asyncio.sleep(8)
         self._logged_in.set()
 
-    def invalidate(self, *, auth: bool = False, integrity: bool = False):
-        if auth:
-            self._delattrs("access_token")
-        if integrity:
-            self._delattrs("client_version")
-            self.integrity_expires = datetime.now(timezone.utc)
+    def invalidate(self):
+        self._delattrs("access_token")
 
 
 class Twitch:
@@ -622,7 +424,7 @@ class Twitch:
         self._drops: dict[str, TimedDrop] = {}
         self._mnt_triggers: deque[datetime] = deque()
         # Client type, session and auth
-        self._client_type: ClientInfo = ClientType.MOBILE_WEB
+        self._client_type: ClientInfo = ClientType.ANDROID_APP
         self._session: aiohttp.ClientSession | None = None
         self._auth_state: _AuthState = _AuthState(self)
         # GUI
@@ -632,7 +434,6 @@ class Twitch:
         self.watching_channel: AwaitableValue[Channel] = AwaitableValue()
         self._watching_task: asyncio.Task[None] | None = None
         self._watching_restart = asyncio.Event()
-        self._drop_update: asyncio.Future[bool] | None = None
         # Websocket
         self.websocket = WebsocketPool(self)
         # Maintenance task
@@ -689,7 +490,6 @@ class Twitch:
             cookie_jar.save(COOKIES_PATH)
             await self._session.close()
             self._session = None
-        self._drop_update = None
         self._drops.clear()
         self.channels.clear()
         self.inventory.clear()
@@ -763,6 +563,10 @@ class Twitch:
         return -1
 
     async def run(self):
+        if self.settings.dump:
+            with open(DUMP_PATH, 'w', encoding="utf8"):
+                # replace the existing file with an empty one
+                pass
         while True:
             try:
                 await self._run()
@@ -772,7 +576,7 @@ class Twitch:
             except ExitRequest:
                 break
             except aiohttp.ContentTypeError as exc:
-                raise MinerException(_("login", "unexpected_content")) from exc
+                raise RequestException(_("login", "unexpected_content")) from exc
 
     async def _run(self):
         """
@@ -803,11 +607,16 @@ class Twitch:
         self.change_state(State.INVENTORY_FETCH)
         while True:
             if self._state is State.IDLE:
+                if self.settings.dump:
+                    self.gui.close()
+                    continue
+                self.gui.tray.change_icon("idle")
                 self.gui.status.update(_("gui", "status", "idle"))
                 self.stop_watching()
                 # clear the flag and wait until it's set again
                 self._state_change.clear()
             elif self._state is State.INVENTORY_FETCH:
+                self.gui.tray.change_icon("maint")
                 # ensure the websocket is running
                 await self.websocket.start()
                 await self.fetch_inventory()
@@ -908,10 +717,11 @@ class Twitch:
                 # remove all ACL channels that already exist from the other set
                 acl_channels.difference_update(new_channels)
                 # use the other set to set them online if possible
-                if acl_channels:
-                    await asyncio.gather(
-                        *(channel.update_stream(trigger_events=False) for channel in acl_channels)
-                    )
+                # if acl_channels:
+                #     await asyncio.gather(*(
+                #         channel.update_stream(trigger_events=False)
+                #         for channel in acl_channels
+                #     ))
                 # finally, add them as new channels
                 new_channels.update(acl_channels)
                 for game in no_acl:
@@ -991,6 +801,9 @@ class Twitch:
                     watching_channel,
                 )
             elif self._state is State.CHANNEL_SWITCH:
+                if self.settings.dump:
+                    self.gui.close()
+                    continue
                 self.gui.status.update(_("gui", "status", "switching"))
                 # Change into the selected channel, stay in the watching channel,
                 # or select a new channel that meets the required conditions
@@ -1027,6 +840,7 @@ class Twitch:
                     self.change_state(State.IDLE)
                 del new_watching, selected_channel, watching_channel
             elif self._state is State.EXIT:
+                self.gui.tray.change_icon("pickaxe")
                 self.gui.status.update(_("gui", "status", "exiting"))
                 # we've been requested to exit the application
                 break
@@ -1038,81 +852,61 @@ class Twitch:
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._watching_restart.wait(), timeout=delay)
 
-    @task_wrapper
+    @task_wrapper(critical=True)
     async def _watch_loop(self) -> NoReturn:
         interval: float = WATCH_INTERVAL.total_seconds()
         while True:
             channel: Channel = await self.watching_channel.get()
             succeeded: bool = await channel.send_watch()
             if not succeeded:
-                # this usually means the campaign expired in the middle of mining
-                # NOTE: the maintenance task should switch the channel right after this happens
-                await self._watch_sleep(60)
-                continue
-            last_watch = time()
-            self._drop_update = asyncio.Future()
-            use_active: bool = False
-            try:
-                handled: bool = await asyncio.wait_for(self._drop_update, timeout=10)
-            except asyncio.TimeoutError:
-                # there was no websocket update within 10s
-                handled = False
-                use_active = True
-                logger.log(CALL, "No drop update from the websocket received")
-            self._drop_update = None
-            if not handled:
-                # websocket update timed out, or the update was for an unrelated drop
-                if not use_active:
-                    # we need to use GQL to get the current progress
-                    context = await self.gql_request(GQL_OPERATIONS["CurrentDrop"])
+                logger.log(CALL, f"Watch requested failed for channel: {channel.name}")
+            elif not self.gui.progress.is_counting():
+                # If the previous update was more than 60s ago, and the progress tracker
+                # isn't counting down anymore, that means Twitch has temporarily
+                # stopped reporting drops progress. To ensure the timer keeps at least somewhat
+                # accurate time, we can use GQL to query for the current drop,
+                # or even "pretend" mining as a last resort option.
+                handled: bool = False
+
+                # Solution 1: use GQL to query for the currently mined drop status
+                try:
+                    context = await self.gql_request(
+                        GQL_OPERATIONS["CurrentDrop"].with_variables(
+                            {"channelID": str(channel.id)}
+                        )
+                    )
                     drop_data: JsonType | None = (
                         context["data"]["currentUser"]["dropCurrentSession"]
                     )
-                    if drop_data is not None:
-                        drop = self._drops.get(drop_data["dropID"])
-                        if drop is None:
-                            use_active = True
-                            # usually this means there was a campaign changed between reloads
-                            logger.info("Missing drop detected, reloading...")
-                            self.change_state(State.INVENTORY_FETCH)
-                        elif not drop.can_earn(channel):
-                            # we can't earn this drop in the current watching channel
-                            use_active = True
-                            drop_text = (
-                                f"{drop.name} ({drop.campaign.game}, "
-                                f"{drop.current_minutes}/{drop.required_minutes})"
-                            )
-                            logger.log(CALL, f"Current drop returned mismach: {drop_text}")
-                        else:
-                            drop.update_minutes(drop_data["currentMinutesWatched"])
-                            drop.display()
-                            drop_text = (
-                                f"{drop.name} ({drop.campaign.game}, "
-                                f"{drop.current_minutes}/{drop.required_minutes})"
-                            )
-                            logger.log(CALL, f"Drop progress from GQL: {drop_text}")
-                    else:
-                        use_active = True
-                        logger.log(CALL, "Current drop returned as none")
-                if use_active:
-                    # Sometimes, even GQL fails to give us the correct drop.
-                    # In that case, we can use the locally cached inventory to try
-                    # and put together the drop that we're actually mining right now
-                    # NOTE: get_active_drop uses the watching channel by default,
-                    # so there's no point to pass it here
-                    if (drop := self.get_active_drop()) is not None:
+                except GQLException:
+                    drop_data = None
+                if drop_data is not None:
+                    drop = self._drops.get(drop_data["dropID"])
+                    if drop is not None and drop.can_earn(channel):
+                        drop.update_minutes(drop_data["currentMinutesWatched"])
+                        drop_text = (
+                            f"{drop.name} ({drop.campaign.game}, "
+                            f"{drop.current_minutes}/{drop.required_minutes})"
+                        )
+                        logger.log(CALL, f"Drop progress from GQL: {drop_text}")
+                        handled = True
+
+                # Solution 2: If GQL fails, figure out which drop we're most likely mining
+                # right now, and then bump up the minutes on that drop
+                if not handled:
+                    if (drop := self.get_active_drop(channel)) is not None:
                         drop.bump_minutes()
-                        drop.display()
                         drop_text = (
                             f"{drop.name} ({drop.campaign.game}, "
                             f"{drop.current_minutes}/{drop.required_minutes})"
                         )
                         logger.log(CALL, f"Drop progress from active search: {drop_text}")
+                        handled = True
                     else:
                         logger.log(CALL, "No active drop could be determined")
-            await self._watch_sleep(last_watch + interval - time())
+            await self._watch_sleep(interval)
 
-    @task_wrapper
+    @task_wrapper(critical=True)
     async def _maintenance_task(self) -> None:
         claim_period = timedelta(minutes=30)
         max_period = timedelta(hours=1)
@@ -1125,10 +919,9 @@ class Twitch:
                 break
             next_trigger = min(now + claim_period, next_period)
             trigger_cleanup = False
-            while self._mnt_triggers and (switch_trigger := self._mnt_triggers[0]) <= next_trigger:
+            while self._mnt_triggers and self._mnt_triggers[0] <= next_trigger:
+                next_trigger = self._mnt_triggers.popleft()
                 trigger_cleanup = True
-                self._mnt_triggers.popleft()
-                next_trigger = switch_trigger
             if next_trigger == next_period:
                 trigger_type: str = "Reload"
             elif trigger_cleanup:
@@ -1157,7 +950,7 @@ class Twitch:
                     await watching_channel.claim_bonus()
                 except Exception:
                     pass  # we intentionally silently skip anything else
-        # this triggers this task restart every (up to) 60 minutes
+        # this triggers a restart of this task every (up to) 60 minutes
         logger.log(CALL, "Maintenance task requests a reload")
         self.change_state(State.INVENTORY_FETCH)
 
@@ -1199,6 +992,7 @@ class Twitch:
         )
 
     def watch(self, channel: Channel, *, update_status: bool = True):
+        self.gui.tray.change_icon("active")
         self.gui.channels.set_watching(channel)
         self.watching_channel.set(channel)
         if update_status:
@@ -1332,6 +1126,7 @@ class Twitch:
             return
         drop_id: str = message["data"]["drop_id"]
         drop: TimedDrop | None = self._drops.get(drop_id)
+        watching_channel: Channel | None = self.watching_channel.get_with_default(None)
         if msg_type == "drop-claim":
             if drop is None:
                 logger.error(
@@ -1358,15 +1153,20 @@ class Twitch:
             # by re-sending the watch payload. We can test for it by fetching the current drop
             # via GQL, and then comparing drop IDs.
             await asyncio.sleep(4)
-            for attempt in range(8):
-                context = await self.gql_request(GQL_OPERATIONS["CurrentDrop"])
-                drop_data: JsonType | None = (
-                    context["data"]["currentUser"]["dropCurrentSession"]
-                )
-                if drop_data is None or drop_data["dropID"] != drop.id:
-                    break
-                await asyncio.sleep(2)
-            if campaign.can_earn(self.watching_channel.get_with_default(None)):
+            if watching_channel is not None:
+                for attempt in range(8):
+                    context = await self.gql_request(
+                        GQL_OPERATIONS["CurrentDrop"].with_variables(
+                            {"channelID": str(watching_channel.id)}
+                        )
+                    )
+                    drop_data: JsonType | None = (
+                        context["data"]["currentUser"]["dropCurrentSession"]
+                    )
+                    if drop_data is None or drop_data["dropID"] != drop.id:
+                        break
+                    await asyncio.sleep(2)
+            if campaign.can_earn(watching_channel):
                 self.restart_watching()
             else:
                 self.change_state(State.INVENTORY_FETCH)
@@ -1381,22 +1181,9 @@ class Twitch:
         else:
             drop_text = "<Unknown>"
         logger.log(CALL, f"Drop update from websocket: {drop_text}")
-        if self._drop_update is None:
-            # we aren't actually waiting for a progress update right now, so we can just
-            # ignore the event this time
-            return
-        elif drop is not None and drop.can_earn(self.watching_channel.get_with_default(None)):
+        if drop is not None and drop.can_earn(self.watching_channel.get_with_default(None)):
             # the received payload is for the drop we expected
             drop.update_minutes(message["data"]["current_progress_min"])
-            drop.display()
-            # Let the watch loop know we've handled it here
-            self._drop_update.set_result(True)
-        else:
-            # Sometimes, the drop update we receive doesn't actually match what we're mining.
-            # This is a Twitch bug workaround: signal the watch loop to use GQL
-            # to get the current drop progress instead.
-            self._drop_update.set_result(False)
-        self._drop_update = None
 
     @task_wrapper
     async def process_notifications(self, user_id: int, message: JsonType):
@@ -1540,7 +1327,7 @@ class Twitch:
                     "https://gql.twitch.tv/gql",
                     json=ops,
                     headers=auth_state.headers(user_agent=self._client_type.USER_AGENT, gql=True),
-                    invalidate_after=getattr(auth_state, "integrity_expires", None),
+                    invalidate_after=None,  # unused
                 ) as response:
                     response_json: JsonType | list[JsonType] = await response.json()
             except RequestInvalid:
@@ -1553,11 +1340,13 @@ class Twitch:
                 response_list = [response_json]
             force_retry: bool = False
             for response_json in response_list:
+                # GQL errors handling
                 if "errors" in response_json:
                     for error_dict in response_json["errors"]:
                         if (
                             "message" in error_dict
                             and error_dict["message"] in (
+                                # "server error",
                                 # "service error",
                                 "service unavailable",
                                 "service timeout",
@@ -1567,13 +1356,18 @@ class Twitch:
                             force_retry = True
                             break
                     else:
-                        raise MinerException(f"GQL error: {response_json['errors']}")
+                        raise GQLException(response_json['errors'])
+                # Other error handling
+                elif "error" in response_json:
+                    raise GQLException(
+                        f"{response_json['error']}: {response_json['message']}"
+                    )
                 if force_retry:
                     break
             else:
                 return orig_response
             await asyncio.sleep(delay)
-        raise MinerException()
+        raise GQLException("Retry loop was broken")
 
     def _merge_data(self, primary_data: JsonType, secondary_data: JsonType) -> JsonType:
         merged = {}
@@ -1648,6 +1442,31 @@ class Twitch:
             chunk_campaigns_data = await chunk_coro
             # merge the inventory and campaigns datas together
             inventory_data = self._merge_data(inventory_data, chunk_campaigns_data)
+
+        if self.settings.dump:
+            # dump the campaigns data to the dump file
+            with open(DUMP_PATH, 'a', encoding="utf8") as file:
+                # we need to pre-process the inventory dump a little
+                dump_data: JsonType = deepcopy(inventory_data)
+                for campaign_data in dump_data.values():
+                    # replace ACL lists with a simple text description
+                    if (
+                        campaign_data["allow"]
+                        and campaign_data["allow"].get("isEnabled", True)
+                        and campaign_data["allow"]["channels"]
+                    ):
+                        # simply count the channels included in the ACL
+                        campaign_data["allow"]["channels"] = (
+                            f"{len(campaign_data['allow']['channels'])} channels"
+                        )
+                    # replace drop instance IDs, so they don't include user IDs
+                    for drop_data in campaign_data["timeBasedDrops"]:
+                        if "self" in drop_data and drop_data["self"]["dropInstanceID"]:
+                            drop_data["self"]["dropInstanceID"] = "..."
+                json.dump(dump_data, file, indent=4, sort_keys=True)
+                file.write("\n\n")  # add 2x new line spacer
+                json.dump(claimed_benefits, file, indent=4, sort_keys=True, default=str)
+
         # use the merged data to create campaign objects
         campaigns: list[DropsCampaign] = [
             DropsCampaign(self, campaign_data, claimed_benefits)
@@ -1656,25 +1475,37 @@ class Twitch:
         campaigns.sort(key=lambda c: c.active, reverse=True)
         campaigns.sort(key=lambda c: c.upcoming and c.starts_at or c.ends_at)
         campaigns.sort(key=lambda c: c.linked, reverse=True)
+
         self._drops.clear()
         self.gui.inv.clear()
         self.inventory.clear()
+        self._mnt_triggers.clear()
         switch_triggers: set[datetime] = set()
         next_hour = datetime.now(timezone.utc) + timedelta(hours=1)
-        for i, campaign in enumerate(campaigns, start=1):
-            status_update(
-                _("gui", "status", "adding_campaigns").format(counter=f"({i}/{len(campaigns)})")
-            )
+        # add the campaigns to the internal inventory
+        for campaign in campaigns:
             self._drops.update({drop.id: drop for drop in campaign.drops})
             if campaign.can_earn_within(next_hour):
                 switch_triggers.update(campaign.time_triggers)
-            # NOTE: this fetches pictures from the CDN, so might be slow without a cache
-            await self.gui.inv.add_campaign(campaign)
-            # this is needed here explicitly, because images aren't always fetched
+            self.inventory.append(campaign)
+        # concurrently add the campaigns into the GUI
+        # NOTE: this fetches pictures from the CDN, so might be slow without a cache
+        for i, coro in enumerate(
+            asyncio.as_completed(
+                [
+                    asyncio.create_task(self.gui.inv.add_campaign(campaign))
+                    for campaign in campaigns
+                ]
+            ),
+            start=1,
+        ):
+            status_update(
+                _("gui", "status", "adding_campaigns").format(counter=f"({i}/{len(campaigns)})")
+            )
+            await coro
+            # this is needed here explicitly, because cache reads from disk don't raise this
             if self.gui.close_requested:
                 raise ExitRequest()
-            self.inventory.append(campaign)
-        self._mnt_triggers.clear()
         self._mnt_triggers.extend(sorted(switch_triggers))
         # trim out all triggers that we're already past
         now = datetime.now(timezone.utc)
@@ -1721,7 +1552,7 @@ class Twitch:
                     },
                 })
             )
-        except MinerException as exc:
+        except GQLException as exc:
             raise MinerException(f"Game: {game.slug}") from exc
         if "game" in response["data"]:
             return [

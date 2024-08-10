@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 class SettingsFile(TypedDict):
     proxy: URL
     language: str
-    autostart: bool
     exclude: set[str]
     priority: list[str]
     priority_only: bool
@@ -27,7 +26,6 @@ default_settings: SettingsFile = {
     "proxy": URL(),
     "priority": [],
     "exclude": set(),
-    "autostart": False,
     "priority_only": True,
     "autostart_tray": False,
     "connection_quality": 1,
@@ -40,7 +38,7 @@ class Settings:
     # from args
     log: bool
     tray: bool
-    no_run_check: bool
+    dump: bool
     # args properties
     debug_ws: int
     debug_gql: int
@@ -48,7 +46,6 @@ class Settings:
     # from settings file
     proxy: URL
     language: str
-    autostart: bool
     exclude: set[str]
     priority: list[str]
     priority_only: bool

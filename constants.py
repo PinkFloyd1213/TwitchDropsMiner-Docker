@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 IS_APPIMAGE = "APPIMAGE" in os.environ and os.path.exists(os.environ["APPIMAGE"])
 IS_PACKAGED = hasattr(sys, "_MEIPASS") or IS_APPIMAGE
 # logging special levels
-CALL = logging.INFO - 1
+CALL: int = logging.INFO - 1
 logging.addLevelName(CALL, "CALL")
 # site-packages venv path changes depending on the system platform
 if sys.platform == "win32":
@@ -94,8 +94,9 @@ SITE_PACKAGES_PATH = Path(VENV_PATH, SYS_SITE_PACKAGES)
 LANG_PATH = _resource_path("lang")
 # Other Paths
 LOG_PATH = Path(WORKING_DIR, "log.txt")
-CACHE_PATH = Path(WORKING_DIR, "cache")
+DUMP_PATH = Path(WORKING_DIR, "dump.dat")
 LOCK_PATH = Path(WORKING_DIR, "lock.file")
+CACHE_PATH = Path(WORKING_DIR, "cache")
 CACHE_DB = Path(CACHE_PATH, "mapping.json")
 COOKIES_PATH = Path(WORKING_DIR, "cookies.jar")
 SETTINGS_PATH = Path(WORKING_DIR, "settings.json")
@@ -116,10 +117,17 @@ DEFAULT_LANG = "English"
 PING_INTERVAL = timedelta(minutes=3)
 PING_TIMEOUT = timedelta(seconds=10)
 ONLINE_DELAY = timedelta(seconds=120)
-WATCH_INTERVAL = timedelta(seconds=59)
+WATCH_INTERVAL = timedelta(seconds=20)
 # Strings
 WINDOW_TITLE = f"Twitch Drops Miner v{__version__} (by DevilXD)"
 # Logging
+LOGGING_LEVELS = {
+    0: logging.ERROR,
+    1: logging.WARNING,
+    2: logging.INFO,
+    3: CALL,
+    4: logging.DEBUG,
+}
 FILE_FORMATTER = logging.Formatter(
     "{asctime}.{msecs:03.0f}:\t{levelname:>7}:\t{message}",
     style='{',
@@ -148,40 +156,42 @@ class ClientType:
         "kimne78kx3ncx6brgo4mv6wki5h1ko",
         (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         ),
     )
     MOBILE_WEB = ClientInfo(
         URL("https://m.twitch.tv"),
         "r8s4dac0uhzifbpu9sjdiwzctle17ff",
         [
+            # Chrome versioning is done fully on android only,
+            # other platforms only use the major version
             (
                 "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/126.0.6478.110 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; SM-A205U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/126.0.6478.110 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; SM-A102U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/126.0.6478.110 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; SM-G960U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/126.0.6478.110 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; SM-N960U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/126.0.6478.110 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; LM-Q720) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/126.0.6478.110 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; LM-X420) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/126.0.6478.110 Mobile Safari/537.36"
             ),
         ]
     )
@@ -198,7 +208,7 @@ class ClientType:
         "ue6666qo983tsx6so1t0vnawi233wa",
         (
             "Mozilla/5.0 (Linux; Android 7.1; Smart Box C1) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         ),
     )
 
@@ -284,25 +294,30 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
     # returns current state of drops (current drop progress)
     "CurrentDrop": GQLOperation(
         "DropCurrentSessionContext",
-        "2e4b3630b91552eb05b76a94b6850eb25fe42263b7cf6d06bee6d156dd247c1c",
-        # no variables needed
+        "4d06b702d25d652afb9ef835d2a550031f1cf762b193523a92166f40ea3d142b",
+        variables={
+            "channelID": ...,  # watched channel ID as a str
+            "channelLogin": "",  # always empty string
+        },
     ),
     # returns all available campaigns
     "Campaigns": GQLOperation(
         "ViewerDropsDashboard",
-        "8d5d9b5e3f088f9d1ff39eb2caab11f7a4cf7a3353da9ce82b5778226ff37268",
-        # no variables needed
+        "5a4da2ab3d5b47c9f9ce864e727b2cb346af1e3ea8b897fe8f704a97ff017619",
+        variables={
+            "fetchRewardCampaigns": False,
+        }
     ),
     # returns extended information about a particular campaign
     "CampaignDetails": GQLOperation(
         "DropCampaignDetails",
-        "e5916665a37150808f8ad053ed6394b225d5504d175c7c0b01b9a89634c57136",
+        "e7acdecb05429a62f5984bdcb27ee938ae20543579bf73c3ae44e7c822bc4f54",
         variables={
             "channelLogin": ...,  # user login
             "dropID": ...,  # campaign ID
         },
     ),
-    # returns drops available for a particular channel (unused)
+    # returns drops available for a particular channel
     "AvailableDrops": GQLOperation(
         "DropsHighlightService_AvailableDrops",
         "9a62a09bce5b53e26e64a671e530bc599cb6aab1e5ba3cbd5d85966d3940716f",
@@ -310,24 +325,47 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
             "channelID": ...,  # channel ID as a str
         },
     ),
+    # retuns stream playback access token
+    "PlaybackAccessToken": GQLOperation(
+        "PlaybackAccessToken",
+        "3093517e37e4f4cb48906155bcd894150aef92617939236d2508f3375ab732ce",
+        variables={
+            "isLive": True,
+            "login": ...,  # channel login
+            "isVod": False,
+            "vodID": "",
+            "playerType": "site"
+        },
+    ),
     # returns live channels for a particular game
     "GameDirectory": GQLOperation(
         "DirectoryPage_Game",
-        "3c9a94ee095c735e43ed3ad6ce6d4cbd03c4c6f754b31de54993e0d48fd54e30",
+        "c7c9d5aad09155c4161d2382092dc44610367f3536aac39019ec2582ae5065f9",
         variables={
-            "limit": ...,  # limit of channels returned
+            "limit": 30,  # limit of channels returned
             "slug": ...,  # game slug
             "imageWidth": 50,
+            "includeIsDJ": False,
             "options": {
                 "broadcasterLanguages": [],
                 "freeformTags": None,
                 "includeRestricted": ["SUB_ONLY_LIVE"],
                 "recommendationsContext": {"platform": "web"},
-                "sort": "RELEVANCE",
+                "sort": "RELEVANCE",  # also accepted: "VIEWER_COUNT"
+                "systemFilters": [],
                 "tags": [],
                 "requestID": "JIRA-VXP-2397",
             },
+            "includeIsDJ": False,
+            "includePreviewBlur": True,
             "sortTypeIsRecency": False,
+        },
+    ),
+    "SlugRedirect": GQLOperation(  # can be used to turn game name -> game slug
+        "DirectoryGameRedirect",
+        "1f0300090caceec51f33c5e20647aceff9017f740f223c3c532ba6fa59f6b6cc",
+        variables={
+            "name": ...,  # game name
         },
     ),
     "NotificationsView": GQLOperation(  # unused, triggers notifications "update-summary"

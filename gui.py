@@ -30,13 +30,19 @@ if sys.platform == "win32":
 
 from translate import _
 from cache import ImageCache
-from exceptions import ExitRequest
+from exceptions import MinerException, ExitRequest
 from utils import resource_path, set_root_icon, webopen, Game, _T
 from constants import (
-    SELF_PATH, OUTPUT_FORMATTER, WS_TOPICS_LIMIT, MAX_WEBSOCKETS, WINDOW_TITLE, State
+    SELF_PATH,
+    WINDOW_TITLE,
+    LOGGING_LEVELS,
+    MAX_WEBSOCKETS,
+    WS_TOPICS_LIMIT,
+    OUTPUT_FORMATTER,
+    State,
 )
 if sys.platform == "win32":
-    from registry import RegistryKey, ValueType
+    from registry import RegistryKey, ValueType, ValueNotFound
 
 
 if TYPE_CHECKING:
@@ -700,6 +706,9 @@ class CampaignProgress:
             self._timer_task.cancel()
             self._timer_task = None
 
+    def is_counting(self) -> bool:
+        return self._timer_task is not None
+
     def display(self, drop: TimedDrop | None, *, countdown: bool = True, subone: bool = False):
         self._drop = drop
         vars_drop = self._vars["drop"]
@@ -1035,24 +1044,52 @@ class TrayIcon:
     def __init__(self, manager: GUIManager, master: ttk.Widget):
         self._manager = manager
         self.icon: pystray.Icon | None = None
-        self.icon_image = Image_module.open(resource_path("pickaxe.ico"))
+        self._icon_images: dict[str, Image_module.Image] = {
+            "pickaxe": Image_module.open(resource_path("icons/pickaxe.ico")),
+            "active": Image_module.open(resource_path("icons/active.ico")),
+            "idle": Image_module.open(resource_path("icons/idle.ico")),
+            "error": Image_module.open(resource_path("icons/error.ico")),
+            "maint": Image_module.open(resource_path("icons/maint.ico")),
+        }
+        self._icon_state: str = "pickaxe"
         self._button = ttk.Button(master, command=self.minimize, text=_("gui", "tray", "minimize"))
         self._button.grid(column=0, row=0, sticky="ne")
 
     def __del__(self) -> None:
         self.stop()
-        self.icon_image.close()
+        for icon_image in self._icon_images.values():
+            icon_image.close()
+
+    def _shorten(self, text: str, by_len: int, min_len: int) -> str:
+        if (text_len := len(text)) <= min_len + 3 or by_len <= 0:
+            # cannot shorten
+            return text
+        return text[:-min(by_len + 3, text_len - min_len)] + "..."
 
     def get_title(self, drop: TimedDrop | None) -> str:
         if drop is None:
             return self.TITLE
         campaign = drop.campaign
-        return (
-            f"{self.TITLE}\n"
-            f"{campaign.game.name}\n"
-            f"{drop.rewards_text()} "
-            f"{drop.progress:.1%} ({campaign.claimed_drops}/{campaign.total_drops})"
-        )
+        title_parts: list[str] = [
+            f"{self.TITLE}\n",
+            f"{campaign.game.name}\n",
+            drop.rewards_text(),
+            f" {drop.progress:.1%} ({campaign.claimed_drops}/{campaign.total_drops})"
+        ]
+        min_len: int = 30
+        max_len: int = 127
+        missing_len = len(''.join(title_parts)) - max_len
+        if missing_len > 0:
+            # try shortening the reward text
+            title_parts[2] = self._shorten(title_parts[2], missing_len, min_len)
+            missing_len = len(''.join(title_parts)) - max_len
+        if missing_len > 0:
+            # try shortening the game name
+            title_parts[1] = self._shorten(title_parts[1], missing_len, min_len)
+            missing_len = len(''.join(title_parts)) - max_len
+        if missing_len > 0:
+            raise MinerException(f"Title couldn't be shortened: {''.join(title_parts)}")
+        return ''.join(title_parts)
 
     def _start(self):
         loop = asyncio.get_running_loop()
@@ -1067,7 +1104,9 @@ class TrayIcon:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(_("gui", "tray", "quit"), bridge(self.quit)),
         )
-        self.icon = pystray.Icon("twitch_miner", self.icon_image, self.get_title(drop), menu)
+        self.icon = pystray.Icon(
+            "twitch_miner", self._icon_images[self._icon_state], self.get_title(drop), menu
+        )
         # self.icon.run_detached()
         loop.run_in_executor(None, self.icon.run)
 
@@ -1112,6 +1151,13 @@ class TrayIcon:
     def update_title(self, drop: TimedDrop | None):
         if self.icon is not None:
             self.icon.title = self.get_title(drop)
+
+    def change_icon(self, state: str):
+        if state not in self._icon_images:
+            raise ValueError("Invalid icon state")
+        self._icon_state = state
+        if self.icon is not None:
+            self.icon.icon = self._icon_images[state]
 
 
 class Notebook:
@@ -1256,6 +1302,18 @@ class InventoryOverview:
             # refresh only if we're switching to the tab
             self.refresh()
 
+    def get_status(self, campaign: DropsCampaign) -> tuple[str, str]:
+        if campaign.active:
+            status_text: str = _("gui", "inventory", "status", "active")
+            status_color: str = "green"
+        elif campaign.upcoming:
+            status_text = _("gui", "inventory", "status", "upcoming")
+            status_color = "goldenrod"
+        else:
+            status_text = _("gui", "inventory", "status", "expired")
+            status_color = "red"
+        return (status_text, status_color)
+
     def refresh(self):
         for campaign in self._campaigns:
             # status
@@ -1295,6 +1353,13 @@ class InventoryOverview:
             campaign_frame, text=status_text, takefocus=False, foreground=status_color
         )
         status_label.grid(column=1, row=1, sticky="w", padx=4)
+        # NOTE: We have to save the campaign's frame and status before any awaits happen,
+        # otherwise the len(self._campaigns) call may overwrite an existing frame,
+        # if the campaigns are added concurrently.
+        self._campaigns[campaign] = {
+            "frame": campaign_frame,
+            "status": status_label,
+        }
         # Starts / Ends
         MouseOverLabel(
             campaign_frame,
@@ -1369,10 +1434,6 @@ class InventoryOverview:
             self._drops[drop.id] = label = MouseOverLabel(drop_frame)
             self.update_progress(drop, label)
             label.grid(column=0, row=1)
-        self._campaigns[campaign] = {
-            "frame": campaign_frame,
-            "status": status_label,
-        }
         if self._manager.tabs.current_tab() == 1:
             self._update_visibility(campaign)
             self._canvas_update()
@@ -1382,18 +1443,6 @@ class InventoryOverview:
             child.destroy()
         self._drops.clear()
         self._campaigns.clear()
-
-    def get_status(self, campaign: DropsCampaign) -> tuple[str, str]:
-        if campaign.active:
-            status_text: str = _("gui", "inventory", "status", "active")
-            status_color: str = "green"
-        elif campaign.upcoming:
-            status_text = _("gui", "inventory", "status", "upcoming")
-            status_color = "goldenrod"
-        else:
-            status_text = _("gui", "inventory", "status", "expired")
-            status_color = "red"
-        return (status_text, status_color)
 
     def update_progress(self, drop: TimedDrop, label: MouseOverLabel) -> None:
         # Returns: main text, alt text, text color
@@ -1469,10 +1518,11 @@ class SettingsPanel:
         self._vars: _SettingsVars = {
             "proxy": StringVar(master, str(self._settings.proxy)),
             "tray": IntVar(master, self._settings.autostart_tray),
-            "autostart": IntVar(master, self._settings.autostart),
+            "autostart": IntVar(master, 0),
             "priority_only": IntVar(master, self._settings.priority_only),
             "tray_notifications": IntVar(master, self._settings.tray_notifications),
         }
+        self._game_names: set[str] = set()
         master.rowconfigure(0, weight=1)
         master.columnconfigure(0, weight=1)
         # use a frame to center the content within the tab
@@ -1553,7 +1603,7 @@ class SettingsPanel:
         self._priority_entry.grid(column=0, row=0, sticky="ew")
         priority_frame.columnconfigure(0, weight=1)
         ttk.Button(
-            priority_frame, text="+", command=self.priority_add, width=2, style="Large.TButton"
+            priority_frame, text="➕", command=self.priority_add, width=2, style="Large.TButton"
         ).grid(column=1, row=0)
         self._priority_list = PaddedListbox(
             priority_frame,
@@ -1596,7 +1646,7 @@ class SettingsPanel:
         )
         self._exclude_entry.grid(column=0, row=0, sticky="ew")
         ttk.Button(
-            exclude_frame, text="+", command=self.exclude_add, width=2, style="Large.TButton"
+            exclude_frame, text="➕", command=self.exclude_add, width=2, style="Large.TButton"
         ).grid(column=1, row=0)
         self._exclude_list = PaddedListbox(
             exclude_frame,
@@ -1624,6 +1674,8 @@ class SettingsPanel:
             command=self._twitch.state_change(State.INVENTORY_FETCH),
         ).grid(column=1, row=0)
 
+        self._vars["autostart"].set(self._query_autostart())
+
     def clear_selection(self) -> None:
         self._priority_list.selection_clear(0, "end")
         self._exclude_list.selection_clear(0, "end")
@@ -1631,53 +1683,95 @@ class SettingsPanel:
     def update_notifications(self) -> None:
         self._settings.tray_notifications = bool(self._vars["tray_notifications"].get())
 
-    def _get_autostart_path(self, tray: bool) -> str:
-        self_path = f'"{SELF_PATH.resolve()!s}"'
-        if tray:
-            self_path += " --tray"
-        return self_path
+    def _get_self_path(self) -> str:
+        # NOTE: we need double quotes in case the path contains spaces
+        return f'"{SELF_PATH.resolve()!s}"'
+
+    def _get_autostart_path(self) -> str:
+        flags: list[str] = ['']  # this will add a space between self path and flags
+        # if applicable, include the current logging level as well
+        for lvl_idx, lvl_value in LOGGING_LEVELS.items():
+            if lvl_value == self._settings.logging_level:
+                if lvl_idx > 0:
+                    flags.append(f"-{'v' * lvl_idx}")
+                break
+        if self._vars["tray"].get():
+            flags.append("--tray")
+        return self._get_self_path() + ' '.join(flags)
+
+    def _get_linux_autostart_filepath(self) -> Path:
+        autostart_folder: Path = Path("~/.config/autostart").expanduser()
+        if (config_home := os.environ.get("XDG_CONFIG_HOME")) is not None:
+            config_autostart: Path = Path(config_home, "autostart").expanduser()
+            if config_autostart.exists():
+                autostart_folder = config_autostart
+        return autostart_folder / f"{self.AUTOSTART_NAME}.desktop"
+
+    def _query_autostart(self) -> bool:
+        if sys.platform == "win32":
+            with RegistryKey(self.AUTOSTART_KEY, read_only=True) as key:
+                try:
+                    value_type, value = key.get(self.AUTOSTART_NAME)
+                except ValueNotFound:
+                    return False
+                # TODO: Consider deleting the old value to avoid autostart errors
+                return (
+                    value_type is ValueType.REG_SZ
+                    and self._get_self_path() in value
+                )
+        elif sys.platform == "linux":
+            autostart_file: Path = self._get_linux_autostart_filepath()
+            if not autostart_file.exists():
+                return False
+            with autostart_file.open('r', encoding="utf8") as file:
+                # TODO: Consider deleting the old file to avoid autostart errors
+                return self._get_self_path() not in file.read()
 
     def update_autostart(self) -> None:
         enabled = bool(self._vars["autostart"].get())
-        tray = bool(self._vars["tray"].get())
-        self._settings.autostart = enabled
-        self._settings.autostart_tray = tray
+        self._settings.autostart_tray = bool(self._vars["tray"].get())
         if sys.platform == "win32":
             if enabled:
-                # NOTE: we need double quotes in case the path contains spaces
-                autostart_path = self._get_autostart_path(tray)
                 with RegistryKey(self.AUTOSTART_KEY) as key:
-                    key.set(self.AUTOSTART_NAME, ValueType.REG_SZ, autostart_path)
+                    key.set(
+                        self.AUTOSTART_NAME,
+                        ValueType.REG_SZ,
+                        self._get_autostart_path(),
+                    )
             else:
                 with RegistryKey(self.AUTOSTART_KEY) as key:
                     key.delete(self.AUTOSTART_NAME, silent=True)
         elif sys.platform == "linux":
-            autostart_folder: Path = Path("~/.config/autostart").expanduser()
-            if (config_home := os.environ.get("XDG_CONFIG_HOME")) is not None:
-                config_autostart: Path = Path(config_home, "autostart").expanduser()
-                if config_autostart.exists():
-                    autostart_folder = config_autostart
-            autostart_file: Path = autostart_folder / f"{self.AUTOSTART_NAME}.desktop"
+            autostart_file: Path = self._get_linux_autostart_filepath()
             if enabled:
-                autostart_path = self._get_autostart_path(tray)
-                file_contents = dedent(
+                file_contents: str = dedent(
                     f"""
                     [Desktop Entry]
                     Type=Application
                     Name=Twitch Drops Miner
                     Description=Mine timed drops on Twitch
-                    Exec=sh -c '{autostart_path}'
+                    Exec=sh -c '{self._get_autostart_path()}'
                     """
                 )
-                with autostart_file.open("w", encoding="utf8") as file:
+                with autostart_file.open('w', encoding="utf8") as file:
                     file.write(file_contents)
             else:
                 autostart_file.unlink(missing_ok=True)
 
-    def set_games(self, games: abc.Iterable[Game]) -> None:
-        games_list = sorted(map(str, games))
-        self._exclude_entry.config(values=games_list)
-        self._priority_entry.config(values=games_list)
+    def update_excluded_choices(self) -> None:
+        self._exclude_entry.config(
+            values=sorted(self._game_names.difference(self._settings.exclude))
+        )
+
+    def update_priority_choices(self) -> None:
+        self._priority_entry.config(
+            values=sorted(self._game_names.difference(self._settings.priority))
+        )
+
+    def set_games(self, games: set[Game]) -> None:
+        self._game_names.update(game.name for game in games)
+        self.update_excluded_choices()
+        self.update_priority_choices()
 
     def priorities(self) -> dict[str, int]:
         # NOTE: we shift the indexes so that 0 can be used as the default one
@@ -1701,6 +1795,7 @@ class SettingsPanel:
             self._priority_list.see("end")
             self._settings.priority.append(game_name)
             self._settings.alter()
+            self.update_priority_choices()
         else:
             # already there, set the selection on it
             self._priority_list.selection_set(existing_idx)
@@ -1736,6 +1831,7 @@ class SettingsPanel:
         self._priority_list.delete(idx)
         del self._settings.priority[idx]
         self._settings.alter()
+        self.update_priority_choices()
 
     def priority_only(self) -> None:
         self._settings.priority_only = bool(self._vars["priority_only"].get())
@@ -1746,10 +1842,10 @@ class SettingsPanel:
             # prevent adding empty strings
             return
         self._exclude_entry.clear()
-        exclude = self._settings.exclude
-        if game_name not in exclude:
-            exclude.add(game_name)
+        if game_name not in self._settings.exclude:
+            self._settings.exclude.add(game_name)
             self._settings.alter()
+            self.update_excluded_choices()
             # insert it alphabetically
             for i, item in enumerate(self._exclude_list.get(0, "end")):
                 if game_name < item:
@@ -1778,9 +1874,10 @@ class SettingsPanel:
         idx: int = selection[0]
         item: str = self._exclude_list.get(idx)
         if item in self._settings.exclude:
+            self._exclude_list.delete(idx)
             self._settings.exclude.discard(item)
             self._settings.alter()
-            self._exclude_list.delete(idx)
+            self.update_excluded_choices()
 
 
 class HelpTab:
@@ -1872,7 +1969,7 @@ class GUIManager:
         # withdraw immediately to prevent the window from flashing
         self._root.withdraw()
         # root.resizable(False, True)
-        set_root_icon(root, resource_path("pickaxe.ico"))
+        set_root_icon(root, resource_path("icons/pickaxe.ico"))
         root.title(WINDOW_TITLE)  # window title
         root.bind_all("<KeyPress-Escape>", self.unfocus)  # pressing ESC unfocuses selection
         # Image cache for displaying images
@@ -1917,7 +2014,7 @@ class GUIManager:
         style.configure("MS.TLabel", font=monospaced_font)
         # button style with a larger font
         large_font = default_font.copy()
-        large_font.config(size=12)
+        large_font.config(size=10)
         style.configure("Large.TButton", font=large_font)
         # label style that mimics links
         link_font = default_font.copy()
@@ -2114,7 +2211,7 @@ class GUIManager:
         if sound:
             self._root.bell()
 
-    def set_games(self, games: abc.Iterable[Game]) -> None:
+    def set_games(self, games: set[Game]) -> None:
         self.settings.set_games(games)
 
     def display_drop(
@@ -2144,6 +2241,8 @@ if __name__ == "__main__":
     from types import SimpleNamespace
 
     class StrNamespace(SimpleNamespace):
+        __hash__ = object.__hash__  # type: ignore
+
         def __str__(self):
             if hasattr(self, "_str__"):
                 return self._str__(self)
@@ -2259,6 +2358,8 @@ if __name__ == "__main__":
                 priority_only=False,
                 autostart_tray=False,
                 exclude={"Lit Game"},
+                tray_notifications=True,
+                alter=lambda: None,
             )
         )
         mock.change_state = lambda state: mock.gui.print(f"State change: {state.value}")
@@ -2273,11 +2374,11 @@ if __name__ == "__main__":
         # Login form
         gui.login.update("Login required", None)
         # Game selector and settings panel games
-        gui.set_games([
+        gui.set_games(set([
             create_game(420690, "Lit Game"),
             create_game(123456, "Best Game"),
             create_game(654321, "My Game Very Long Name"),
-        ])
+        ]))
         # Channel list
         gui.channels.display(
             create_channel(

@@ -12,24 +12,6 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Run App (INFO)",
-            "type": "python",
-            "request": "launch",
-            "program": "main.py",
-            "args": ["-vv"],
-            "console": "integratedTerminal",
-            "justMyCode": false
-        },
-        {
-            "name": "Run App (INFO+Tray)",
-            "type": "python",
-            "request": "launch",
-            "program": "main.py",
-            "args": ["-vv", "--tray"],
-            "console": "integratedTerminal",
-            "justMyCode": false
-        },
-        {
             "name": "Run App (CALL)",
             "type": "python",
             "request": "launch",
@@ -39,11 +21,29 @@
             "justMyCode": false
         },
         {
+            "name": "Run App (DUMP)",
+            "type": "python",
+            "request": "launch",
+            "program": "main.py",
+            "args": ["--dump"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "Run App (DEBUG+WS)",
             "type": "python",
             "request": "launch",
             "program": "main.py",
             "args": ["-vvv", "--debug-ws"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Run App (DEBUG+GQL)",
+            "type": "python",
+            "request": "launch",
+            "program": "main.py",
+            "args": ["-vvv", "--debug-gql"],
             "console": "integratedTerminal",
             "justMyCode": false
         },
