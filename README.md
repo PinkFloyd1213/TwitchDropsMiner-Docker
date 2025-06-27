@@ -1,50 +1,92 @@
-# Twitch Drops Miner - Docker Edition
+# Twitch Drops Miner - Docker + Web VNC Edition
 
-This project is an unofficial Dockerized fork of the Twitch Drop Miner. It is designed to make the original Twitch Drop Miner tool usable within a Docker environment, facilitating easier deployment and management.
+This is an unofficial Dockerized fork of **TwitchDropsMiner**, enhanced with a built-in web-based VNC interface. You can access the full GUI from any browser without installing a VNC client — perfect for deployment on a NAS or remote server.
 
-## Getting Started
+📦 Available on Docker Hub:
+👉 [pinkfloyd1213/twitch\_drop\_miner](https://hub.docker.com/r/pinkfloyd1213/twitch_drop_miner)
 
-To use this Dockerized version of Twitch Drop Miner, you'll need to have Docker installed on your machine. Once Docker is set up, you can build and run the containerized application. You can find a built image here: [Docker Hub](https://hub.docker.com/repository/docker/pinkfloyd1213/twitch_drop_miner)
+---
 
-### Building the Docker Image
+## 🔧 Getting Started
 
-Clone the repository and navigate to the directory containing the Dockerfile. Run the following command to build the Docker image:
+To use this Dockerized version, make sure you have Docker installed. Optionally, use Docker Compose for simplified setup.
+
+### Option 1 – Docker Compose (Recommended)
+
+```bash
+git clone https://github.com/PinkFloyd1213/TwitchDropsMiner-Docker.git
+cd TwitchDropsMiner-Docker
+docker-compose up -d --build
+```
+
+Then open in your browser:
+
+```
+http://<your-host-ip>:6080/vnc.html
+```
+
+🔐 **Default VNC password:** `secret` (can be changed in `docker-compose.yml`)
+
+---
+
+### Option 2 – Manual Docker Run
+
+Build the image:
 
 ```bash
 docker build -t twitch_drop_miner .
 ```
 
-### Running the Container
-
-To run the container, use the following command:
+Run the container:
 
 ```bash
-docker run -e VNC_PASSWORD=yourpassword -p 5900:5900 twitch_drop_miner
+docker run -d \
+  --name twitch_miner_webvnc \
+  -e VNC_PASSWORD=secret \
+  -p 6080:6080 \
+  twitch_drop_miner
 ```
 
-Replace `yourpassword` with your desired VNC password. This password is required to connect to the VNC server running inside the container.
+Access the GUI at: `http://<your-host-ip>:6080/vnc.html`
 
-### Connecting via VNC
+---
 
-Once the container is running, you can connect to it using a VNC client:
+## 🌍 Access from Browser
 
-1. Open your VNC client.
-2. Connect to `localhost:5900` (or replace `localhost` with the Docker host's IP address if you're running Docker on a remote server).
-3. When prompted, enter the VNC password you set when starting the container.
+* URL: `http://<your-nas-ip>:6080/vnc.html`
+* Use the password set in `VNC_PASSWORD`
 
-## Environment Variables
+---
 
-- `VNC_PASSWORD`: This environment variable is used to set the password for the VNC server. If not specified, a default password (`twitch_miner`) will be used.
+## ⚙️ Environment Variables
 
-## Notes
+| Variable       | Description                            | Default        |
+| -------------- | -------------------------------------- | -------------- |
+| `VNC_PASSWORD` | Password to access the VNC GUI session | `twitch_miner` |
 
-- This project is an unofficial fork and is not officially associated with the original Twitch Drop Miner project.
-- The Dockerization of this project is intended to simplify deployment and usage but comes without any guarantees or official support.
+---
 
-## License
+## 📦 File Overview
 
-Please refer to the license of the original project. This Dockerized fork is subject to the same licensing.
+| File                 | Purpose                                 |
+| -------------------- | --------------------------------------- |
+| `Dockerfile`         | Builds the app environment with GUI/VNC |
+| `entrypoint.sh`      | Starts X, VNC, and TwitchDropsMiner     |
+| `docker-compose.yml` | Simplifies deployment and configuration |
 
+---
+
+## 📝 Notes
+
+* This is an **unofficial** project and is not affiliated with the original TwitchDropsMiner.
+* GUI support is powered by Xvfb, Fluxbox, x11vnc, and noVNC.
+* Ideal for NAS or headless servers where GUI access via browser is preferred.
+
+---
+
+## 📄 License
+
+Refer to the license of the original [TwitchDropsMiner](https://github.com/streamlink/TwitchDropsMiner) project. This Docker adaptation follows the same terms.
 
 
 ==================
