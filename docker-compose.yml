@@ -2,11 +2,12 @@ version: "3"
 
 services:
   twitch_miner:
-    build: .
+    build:
+      context: .
+      platform: linux/amd64 # Or linux/arm64
     container_name: twitch_miner_webvnc
     ports:
       - "6080:6080"
     environment:
       - VNC_PASSWORD=secret
     restart: unless-stopped
-

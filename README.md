@@ -5,6 +5,8 @@ This is an unofficial Dockerized fork of **TwitchDropsMiner**, enhanced with a b
 📦 Available on Docker Hub:
 👉 [pinkfloyd1213/twitch\_drop\_miner](https://hub.docker.com/r/pinkfloyd1213/twitch_drop_miner)
 
+✅ This image is **multi-architecture** and works on both **amd64** (PCs, servers) and **arm64** (Raspberry Pi, NAS, etc.) systems.
+
 ---
 
 ## 🔧 Getting Started
@@ -81,12 +83,14 @@ Access the GUI at: `http://<your-host-ip>:6080/vnc.html`
 * This is an **unofficial** project and is not affiliated with the original TwitchDropsMiner.
 * GUI support is powered by Xvfb, Fluxbox, x11vnc, and noVNC.
 * Ideal for NAS or headless servers where GUI access via browser is preferred.
+* Works on both amd64 and arm64 systems.
 
 ---
 
 ## 📄 License
 
 Refer to the license of the original [TwitchDropsMiner](https://github.com/streamlink/TwitchDropsMiner) project. This Docker adaptation follows the same terms.
+
 
 
 ==================

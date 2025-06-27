@@ -1,13 +1,12 @@
-FROM python:3.10
+FROM python:3.10-slim
 
 WORKDIR /usr/src/app
 
 RUN apt-get update && apt-get install -y \
     libgirepository1.0-dev libcairo2-dev pkg-config python3-dev \
-    gtk+3.0 dbus-x11 libcanberra-gtk-module \
+    libgtk-3-0 dbus-x11 libcanberra-gtk-module \
     x11vnc xvfb fluxbox wget unzip curl \
-    libayatana-appindicator3-dev gir1.2-ayatanaappindicator3-0.1 \
-    && apt-get clean
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Installer les dépendances Python
 COPY requirements.txt ./
@@ -24,10 +23,8 @@ RUN mkdir -p /opt/novnc && \
 
 COPY . .
 
-# Copie du script d’entrée
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV DISPLAY=:1
 ENTRYPOINT ["/entrypoint.sh"]
-

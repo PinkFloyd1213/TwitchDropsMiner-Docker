@@ -18,7 +18,8 @@ from datetime import datetime, timedelta, timezone
 from tkinter import Tk, ttk, StringVar, DoubleVar, IntVar
 from typing import Any, Union, Tuple, TypedDict, NoReturn, Generic, TYPE_CHECKING
 
-import pystray
+if sys.platform == "win32":
+    import pystray
 from yarl import URL
 from PIL.ImageTk import PhotoImage
 from PIL import Image as Image_module
