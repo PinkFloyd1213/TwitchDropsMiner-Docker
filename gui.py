@@ -1948,11 +1948,18 @@ class HelpTab:
             link="https://github.com/DevilXD/TwitchDropsMiner",
             text="https://github.com/DevilXD/TwitchDropsMiner",
         ).grid(column=1, row=1, sticky="nsew")
+        # About - docker version
+        ttk.Label(about, text="Docker version by: ", anchor="e").grid(column=0, row=2, sticky="nsew")
+        LinkLabel(
+            about,
+            link="https://github.com/PinkFloyd1213/TwitchDropsMiner-Docker",
+            text="PinkFloyd1213 (https://github.com/PinkFloyd1213/TwitchDropsMiner-Docker)",
+        ).grid(column=1, row=2, sticky="nsew")
         # About - donate
         ttk.Separator(
             about, orient="horizontal"
-        ).grid(column=0, row=2, columnspan=3, sticky="nsew")
-        ttk.Label(about, text="Donate: ", anchor="e").grid(column=0, row=3, sticky="nsew")
+        ).grid(column=0, row=3, columnspan=3, sticky="nsew")
+        ttk.Label(about, text="Donate: ", anchor="e").grid(column=0, row=4, sticky="nsew")
         LinkLabel(
             about,
             link="https://www.buymeacoffee.com/DevilXD",
@@ -1961,7 +1968,8 @@ class HelpTab:
                 "please consider donating a small amount of money to support me. Thank you!"
             ),
             wraplength=self.WIDTH,
-        ).grid(column=1, row=3, sticky="nsew")
+        ).grid(column=1, row=4, sticky="nsew")
+
         # Useful links
         links = ttk.LabelFrame(
             center_frame, padding=(4, 0, 4, 4), text=_("gui", "help", "links", "name")
@@ -1977,6 +1985,7 @@ class HelpTab:
             link="https://www.twitch.tv/drops/campaigns",
             text=_("gui", "help", "links", "campaigns"),
         ).grid(column=0, row=1, sticky="nsew")
+
         # How It Works
         howitworks = ttk.LabelFrame(
             center_frame, padding=(4, 0, 4, 4), text=_("gui", "help", "how_it_works")
@@ -1985,6 +1994,8 @@ class HelpTab:
         ttk.Label(
             howitworks, text=_("gui", "help", "how_it_works_text"), wraplength=self.WIDTH
         ).grid(sticky="nsew")
+
+        # Getting Started
         getstarted = ttk.LabelFrame(
             center_frame, padding=(4, 0, 4, 4), text=_("gui", "help", "getting_started")
         )
@@ -1992,6 +2003,7 @@ class HelpTab:
         ttk.Label(
             getstarted, text=_("gui", "help", "getting_started_text"), wraplength=self.WIDTH
         ).grid(sticky="nsew")
+
 
 
 ##########################################
