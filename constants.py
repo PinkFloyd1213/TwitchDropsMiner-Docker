@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 IS_APPIMAGE = "APPIMAGE" in os.environ and os.path.exists(os.environ["APPIMAGE"])
 IS_PACKAGED = hasattr(sys, "_MEIPASS") or IS_APPIMAGE
 # logging special levels
-CALL = logging.INFO - 1
+CALL: int = logging.INFO - 1
 logging.addLevelName(CALL, "CALL")
 # site-packages venv path changes depending on the system platform
 if sys.platform == "win32":
@@ -33,6 +33,11 @@ else:
     # The Lib folder is also spelled in lowercase: 'lib'
     version_info = sys.version_info
     SYS_SITE_PACKAGES = f"lib/python{version_info.major}.{version_info.minor}/site-packages"
+# scripts venv path changes depending on the system platform
+if sys.platform == "win32":
+    SYS_SCRIPTS = "Scripts"
+else:
+    SYS_SCRIPTS = "bin"
 
 
 def _resource_path(relative_path: Path | str) -> Path:
@@ -42,7 +47,7 @@ def _resource_path(relative_path: Path | str) -> Path:
     Works for dev and for PyInstaller.
     """
     if IS_APPIMAGE:
-        base_path = Path(sys.argv[0]).absolute().parent
+        base_path = Path(sys.argv[0]).resolve().parent
     elif IS_PACKAGED:
         # PyInstaller's folder where the one-file app is unpacked
         meipass: str = getattr(sys, "_MEIPASS")
@@ -78,24 +83,27 @@ def _merge_vars(base_vars: JsonType, vars: JsonType) -> None:
 
 # Base Paths
 if IS_APPIMAGE:
-    SELF_PATH = Path(os.environ["APPIMAGE"]).absolute()
+    SELF_PATH = Path(os.environ["APPIMAGE"]).resolve()
 else:
-    # NOTE: pyinstaller will set sys.argv[0] to its own executable when building,
-    # detect this to use __file__ and main.py redirection instead
-    SELF_PATH = Path(sys.argv[0]).absolute()
-    if SELF_PATH.stem == "pyinstaller":
-        SELF_PATH = Path(__file__).with_name("main.py").absolute()
+    # NOTE: pyinstaller will set sys.argv[0] to its own executable when building
+    # NOTE: sys.argv[0] will point to gui.py when running the gui.py directly for GUI debug
+    # detect these and use __file__ and main.py redirection instead
+    SELF_PATH = Path(sys.argv[0]).resolve()
+    if SELF_PATH.stem == "pyinstaller" or SELF_PATH.name == "gui.py":
+        SELF_PATH = Path(__file__).with_name("main.py").resolve()
 WORKING_DIR = SELF_PATH.parent
 # Development paths
 VENV_PATH = Path(WORKING_DIR, "env")
 SITE_PACKAGES_PATH = Path(VENV_PATH, SYS_SITE_PACKAGES)
+SCRIPTS_PATH = Path(VENV_PATH, SYS_SCRIPTS)
 # Translations path
 # NOTE: These don't have to be available to the end-user, so the path points to the internal dir
 LANG_PATH = _resource_path("lang")
 # Other Paths
 LOG_PATH = Path(WORKING_DIR, "log.txt")
-CACHE_PATH = Path(WORKING_DIR, "cache")
+DUMP_PATH = Path(WORKING_DIR, "dump.dat")
 LOCK_PATH = Path(WORKING_DIR, "lock.file")
+CACHE_PATH = Path(WORKING_DIR, "cache")
 CACHE_DB = Path(CACHE_PATH, "mapping.json")
 COOKIES_PATH = Path(WORKING_DIR, "cookies.jar")
 SETTINGS_PATH = Path(WORKING_DIR, "settings.json")
@@ -104,7 +112,8 @@ JsonType = Dict[str, Any]
 URLType = NewType("URLType", str)
 TopicProcess: TypeAlias = "abc.Callable[[int, JsonType], Any]"
 # Values
-BASE_TOPICS = 3
+MAX_INT = sys.maxsize
+BASE_TOPICS = 2
 MAX_WEBSOCKETS = 8
 WS_TOPICS_LIMIT = 50
 TOPICS_PER_CHANNEL = 2
@@ -116,10 +125,17 @@ DEFAULT_LANG = "English"
 PING_INTERVAL = timedelta(minutes=3)
 PING_TIMEOUT = timedelta(seconds=10)
 ONLINE_DELAY = timedelta(seconds=120)
-WATCH_INTERVAL = timedelta(seconds=59)
+WATCH_INTERVAL = timedelta(seconds=20)
 # Strings
 WINDOW_TITLE = f"Twitch Drops Miner v{__version__} (by DevilXD)"
 # Logging
+LOGGING_LEVELS = {
+    0: logging.ERROR,
+    1: logging.WARNING,
+    2: logging.INFO,
+    3: CALL,
+    4: logging.DEBUG,
+}
 FILE_FORMATTER = logging.Formatter(
     "{asctime}.{msecs:03.0f}:\t{levelname:>7}:\t{message}",
     style='{',
@@ -148,40 +164,42 @@ class ClientType:
         "kimne78kx3ncx6brgo4mv6wki5h1ko",
         (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
         ),
     )
     MOBILE_WEB = ClientInfo(
         URL("https://m.twitch.tv"),
         "r8s4dac0uhzifbpu9sjdiwzctle17ff",
         [
+            # Chrome versioning is done fully on android only,
+            # other platforms only use the major version
             (
                 "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; SM-A205U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; SM-A102U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; SM-G960U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; SM-N960U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; LM-Q720) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
             ),
             (
                 "Mozilla/5.0 (Linux; Android 13; LM-X420) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/119.0.6045.66 Mobile Safari/537.36"
+                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
             ),
         ]
     )
@@ -198,7 +216,7 @@ class ClientType:
         "ue6666qo983tsx6so1t0vnawi233wa",
         (
             "Mozilla/5.0 (Linux; Android 7.1; Smart Box C1) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
         ),
     )
 
@@ -211,6 +229,12 @@ class State(Enum):
     CHANNELS_CLEANUP = auto()
     CHANNEL_SWITCH = auto()
     EXIT = auto()
+
+
+class PriorityMode(Enum):
+    PRIORITY_ONLY = 0
+    ENDING_SOONEST = 1
+    LOW_AVBL_FIRST = 2
 
 
 class GQLOperation(JsonType):
@@ -241,7 +265,7 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
     # returns stream information for a particular channel
     "GetStreamInfo": GQLOperation(
         "VideoPlayerStreamInfoOverlayChannel",
-        "a5f2e34d626a9f4f5c0204f910bab2194948a9502089be558bb6e779a9e1b3d2",
+        "198492e0857f6aedead9665c81c5a06d67b25b58034649687124083ff288597d",
         variables={
             "channel": ...,  # channel login
         },
@@ -270,7 +294,7 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
     # returns current state of points (balance, claim available) for a particular channel
     "ChannelPointsContext": GQLOperation(
         "ChannelPointsContext",
-        "1530a003a7d374b0380b79db0be0534f30ff46e61cffa2bc0e2468a909fbc024",
+        "374314de591e69925fce3ddc2bcf085796f56ebb8cad67a0daa3165c03adc345",
         variables={
             "channelLogin": ...,  # channel login
         },
@@ -278,31 +302,38 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
     # returns all in-progress campaigns
     "Inventory": GQLOperation(
         "Inventory",
-        "37fea486d6179047c41d0f549088a4c3a7dd60c05c70956a1490262f532dccd9",
-        # no variables needed
+        "09acb7d3d7e605a92bdfdcc465f6aa481b71c234d8686a9ba38ea5ed51507592",
+        variables={
+            "fetchRewardCampaigns": False,
+        }
     ),
     # returns current state of drops (current drop progress)
     "CurrentDrop": GQLOperation(
         "DropCurrentSessionContext",
-        "2e4b3630b91552eb05b76a94b6850eb25fe42263b7cf6d06bee6d156dd247c1c",
-        # no variables needed
+        "4d06b702d25d652afb9ef835d2a550031f1cf762b193523a92166f40ea3d142b",
+        variables={
+            "channelID": ...,  # watched channel ID as a str
+            "channelLogin": "",  # always empty string
+        },
     ),
     # returns all available campaigns
     "Campaigns": GQLOperation(
         "ViewerDropsDashboard",
-        "8d5d9b5e3f088f9d1ff39eb2caab11f7a4cf7a3353da9ce82b5778226ff37268",
-        # no variables needed
+        "5a4da2ab3d5b47c9f9ce864e727b2cb346af1e3ea8b897fe8f704a97ff017619",
+        variables={
+            "fetchRewardCampaigns": False,
+        }
     ),
     # returns extended information about a particular campaign
     "CampaignDetails": GQLOperation(
         "DropCampaignDetails",
-        "e5916665a37150808f8ad053ed6394b225d5504d175c7c0b01b9a89634c57136",
+        "039277bf98f3130929262cc7c6efd9c141ca3749cb6dca442fc8ead9a53f77c1",
         variables={
             "channelLogin": ...,  # user login
             "dropID": ...,  # campaign ID
         },
     ),
-    # returns drops available for a particular channel (unused)
+    # returns drops available for a particular channel
     "AvailableDrops": GQLOperation(
         "DropsHighlightService_AvailableDrops",
         "9a62a09bce5b53e26e64a671e530bc599cb6aab1e5ba3cbd5d85966d3940716f",
@@ -310,36 +341,59 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
             "channelID": ...,  # channel ID as a str
         },
     ),
+    # retuns stream playback access token
+    "PlaybackAccessToken": GQLOperation(
+        "PlaybackAccessToken",
+        "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9",
+        variables={
+            "isLive": True,
+            "isVod": False,
+            "login": ...,  # channel login
+            "platform": "web",
+            "playerType": "site",
+            "vodID": "",
+        },
+    ),
     # returns live channels for a particular game
     "GameDirectory": GQLOperation(
         "DirectoryPage_Game",
-        "3c9a94ee095c735e43ed3ad6ce6d4cbd03c4c6f754b31de54993e0d48fd54e30",
+        "c7c9d5aad09155c4161d2382092dc44610367f3536aac39019ec2582ae5065f9",
         variables={
-            "limit": ...,  # limit of channels returned
+            "limit": 30,  # limit of channels returned
             "slug": ...,  # game slug
             "imageWidth": 50,
+            "includeIsDJ": False,
             "options": {
                 "broadcasterLanguages": [],
                 "freeformTags": None,
                 "includeRestricted": ["SUB_ONLY_LIVE"],
                 "recommendationsContext": {"platform": "web"},
-                "sort": "RELEVANCE",
+                "sort": "RELEVANCE",  # also accepted: "VIEWER_COUNT"
+                "systemFilters": [],
                 "tags": [],
                 "requestID": "JIRA-VXP-2397",
             },
+            "includeIsDJ": False,
             "sortTypeIsRecency": False,
+        },
+    ),
+    "SlugRedirect": GQLOperation(  # can be used to turn game name -> game slug
+        "DirectoryGameRedirect",
+        "1f0300090caceec51f33c5e20647aceff9017f740f223c3c532ba6fa59f6b6cc",
+        variables={
+            "name": ...,  # game name
         },
     ),
     "NotificationsView": GQLOperation(  # unused, triggers notifications "update-summary"
         "OnsiteNotifications_View",
-        "f6bdb1298f376539487f28b7f8a6b5d7434ec04ba4d7dc5c232b258410ae04d6",
+        "e8e06193f8df73d04a1260df318585d1bd7a7bb447afa058e52095513f2bfa4f",
         variables={
             "input": {},
         },
     ),
     "NotificationsList": GQLOperation(  # unused
         "OnsiteNotifications_ListNotifications",
-        "e709b905ddb963d7cf4a8f6760148926ecbd0eee0f2edc48d1cf17f3e87f6490",
+        "11cdb54a2706c2c0b2969769907675680f02a6e77d8afe79a749180ad16bfea6",
         variables={
             "cursor": "",
             "displayType": "VIEWER",

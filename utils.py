@@ -19,25 +19,15 @@ from contextlib import suppress
 from functools import cached_property
 from datetime import datetime, timezone
 from collections import abc, OrderedDict
-from typing import (
-    Any, Literal, MutableSet, Callable, Generic, Mapping, TypeVar, cast, TYPE_CHECKING
-)
+from typing import Any, Literal, Callable, Generic, Mapping, TypeVar, ParamSpec, cast
 
-import yarl
+from yarl import URL
 from PIL.ImageTk import PhotoImage
 from PIL import Image as Image_module
 
-from constants import JsonType, IS_PACKAGED
 from exceptions import ExitRequest, ReloadRequest
+from constants import IS_PACKAGED, JsonType, PriorityMode
 from constants import _resource_path as resource_path  # noqa
-
-if TYPE_CHECKING:
-    from typing_extensions import ParamSpec
-else:
-    # stub it
-    class ParamSpec:
-        def __init__(*args, **kwargs):
-            pass
 
 
 _T = TypeVar("_T")  # type
@@ -50,7 +40,7 @@ logger = logging.getLogger("TwitchDrops")
 def set_root_icon(root: tk.Tk, image_path: Path | str) -> None:
     with Image_module.open(image_path) as image:
         icon_photo = PhotoImage(master=root, image=image)
-    root.iconphoto(True, icon_photo)
+    root.iconphoto(True, icon_photo)  # type: ignore[arg-type]
     # keep a reference to the PhotoImage to avoid the ResourceWarning
     root._icon_image = icon_photo  # type: ignore[attr-defined]
 
@@ -131,18 +121,36 @@ def deduplicate(iterable: abc.Iterable[_T]) -> list[_T]:
 
 
 def task_wrapper(
-    afunc: abc.Callable[_P, abc.Coroutine[Any, Any, _T]]
-) -> abc.Callable[_P, abc.Coroutine[Any, Any, _T]]:
-    @wraps(afunc)
-    async def wrapper(*args: _P.args, **kwargs: _P.kwargs):
-        try:
-            await afunc(*args, **kwargs)
-        except (ExitRequest, ReloadRequest):
-            pass
-        except Exception:
-            logger.exception("Exception in task")
-            raise  # raise up to the wrapping task
-    return wrapper
+    afunc: abc.Callable[_P, abc.Coroutine[Any, Any, _T]] | None = None, *, critical: bool = False
+):
+    def decorator(
+        afunc: abc.Callable[_P, abc.Coroutine[Any, Any, _T]]
+    ) -> abc.Callable[_P, abc.Coroutine[Any, Any, _T]]:
+        @wraps(afunc)
+        async def wrapper(*args: _P.args, **kwargs: _P.kwargs):
+            try:
+                await afunc(*args, **kwargs)
+            except (ExitRequest, ReloadRequest):
+                pass
+            except Exception:
+                logger.exception(f"Exception in {afunc.__name__} task")
+                if critical:
+                    # critical task's death should trigger a termination.
+                    # there isn't an easy and sure way to obtain the Twitch instance here,
+                    # but we can improvise finding it
+                    from twitch import Twitch  # cyclic import
+                    probe = args and args[0] or None  # extract from 'self' arg
+                    if isinstance(probe, Twitch):
+                        probe.close()
+                    elif probe is not None:
+                        probe = getattr(probe, "_twitch", None)  # extract from '_twitch' attr
+                        if isinstance(probe, Twitch):
+                            probe.close()
+                raise  # raise up to the wrapping task
+        return wrapper
+    if afunc is None:
+        return decorator
+    return decorator(afunc)
 
 
 def invalidate_cache(instance, *attrnames):
@@ -157,16 +165,18 @@ def invalidate_cache(instance, *attrnames):
 def _serialize(obj: Any) -> Any:
     # convert data
     d: int | str | float | list[Any] | JsonType
-    if isinstance(obj, set):
-        d = list(obj)
-    elif isinstance(obj, Enum):
-        d = obj.value
-    elif isinstance(obj, datetime):
+    if isinstance(obj, datetime):
         if obj.tzinfo is None:
             # assume naive objects are UTC
             obj = obj.replace(tzinfo=timezone.utc)
         d = obj.timestamp()
-    elif isinstance(obj, yarl.URL):
+    elif isinstance(obj, set):
+        d = list(obj)
+    elif isinstance(obj, Enum):
+        # NOTE: IntEnum cannot be used, as it will get serialized as a plain integer,
+        # then loaded back as an integer as well.
+        d = obj.value
+    elif isinstance(obj, URL):
         d = str(obj)
     else:
         raise TypeError(obj)
@@ -180,8 +190,9 @@ def _serialize(obj: Any) -> Any:
 _MISSING = object()
 SERIALIZE_ENV: dict[str, Callable[[Any], object]] = {
     "set": set,
+    "URL": URL,
+    "PriorityMode": PriorityMode,
     "datetime": lambda d: datetime.fromtimestamp(d, timezone.utc),
-    "URL": yarl.URL,
 }
 
 
@@ -212,16 +223,14 @@ def merge_json(obj: JsonType, template: Mapping[Any, Any]) -> None:
     # NOTE: This modifies object in place
     for k, v in list(obj.items()):
         if k not in template:
+            # unknown key: overwrite from template
             del obj[k]
-        elif isinstance(v, dict):
-            if isinstance(template[k], dict):
-                merge_json(v, template[k])
-            else:
-                # object is a dict, template is not: overwrite from template
-                obj[k] = template[k]
-        elif isinstance(template[k], dict):
-            # template is a dict, object is not: overwrite from template
+        elif type(v) is not type(template[k]):
+            # types don't match: overwrite from template
             obj[k] = template[k]
+        elif isinstance(v, dict):
+            assert isinstance(template[k], dict)
+            merge_json(v, template[k])
     # ensure the object is not missing any keys
     for k in template.keys():
         if k not in obj:
@@ -245,7 +254,8 @@ def json_save(path: Path, contents: Mapping[Any, Any], *, sort: bool = False) ->
         json.dump(contents, file, default=_serialize, sort_keys=sort, indent=4)
 
 
-def webopen(url: str):
+def webopen(url: URL | str):
+    url_str = str(url)
     if IS_PACKAGED and sys.platform == "linux":
         # https://pyinstaller.org/en/stable/
         # runtime-information.html#ld-library-path-libpath-considerations
@@ -259,7 +269,7 @@ def webopen(url: str):
             # pop current
             os.environ.pop(ld_env)
 
-        webbrowser.open_new_tab(url)
+        webbrowser.open_new_tab(url_str)
 
         if ld_path_curr is not None:
             os.environ[ld_env] = ld_path_curr
@@ -267,7 +277,7 @@ def webopen(url: str):
             # pop original
             os.environ.pop(ld_env)
     else:
-        webbrowser.open_new_tab(url)
+        webbrowser.open_new_tab(url_str)
 
 
 class ExponentialBackoff:
@@ -318,44 +328,49 @@ class ExponentialBackoff:
         self.steps = 0
 
 
-class OrderedSet(MutableSet[_T]):
-    """
-    Implementation of a set that preserves insertion order,
-    based on OrderedDict with values set to None.
-    """
-    def __init__(self, iterable: abc.Iterable[_T] = [], /):
-        self._items: OrderedDict[_T, None] = OrderedDict((item, None) for item in iterable)
+class RateLimiter:
+    def __init__(self, *, capacity: int, window: int):
+        self.total: int = 0
+        self.concurrent: int = 0
+        self.window: int = window
+        self.capacity: int = capacity
+        self._reset_task: asyncio.Task[None] | None = None
+        self._cond: asyncio.Condition = asyncio.Condition()
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}([{', '.join(map(repr, self._items))}])"
+        return f"{self.__class__.__name__}({self.concurrent}/{self.total}/{self.capacity})"
 
-    def __contains__(self, item: object, /) -> bool:
-        return item in self._items
+    def __del__(self) -> None:
+        if self._reset_task is not None:
+            self._reset_task.cancel()
 
-    def __iter__(self) -> abc.Iterator[_T]:
-        return iter(self._items)
+    def _can_proceed(self) -> bool:
+        return max(self.total, self.concurrent) < self.capacity
 
-    def __len__(self) -> int:
-        return len(self._items)
+    async def __aenter__(self):
+        async with self._cond:
+            await self._cond.wait_for(self._can_proceed)
+            self.total += 1
+            self.concurrent += 1
+            if self._reset_task is None:
+                self._reset_task = asyncio.create_task(self._rtask())
 
-    def add(self, item: _T, /) -> None:
-        self._items[item] = None
+    async def __aexit__(self, exc_type, exc, tb):
+        self.concurrent -= 1
+        async with self._cond:
+            self._cond.notify(self.capacity - self.concurrent)
 
-    def discard(self, item: _T, /) -> None:
-        with suppress(KeyError):
-            del self._items[item]
+    async def _reset(self) -> None:
+        if self._reset_task is not None:
+            self._reset_task = None
+        async with self._cond:
+            self.total = 0
+            if self.concurrent < self.capacity:
+                self._cond.notify(self.capacity - self.concurrent)
 
-    def update(self, *others: abc.Iterable[_T]) -> None:
-        for it in others:
-            for item in it:
-                if item not in self._items:
-                    self._items[item] = None
-
-    def difference_update(self, *others: abc.Iterable[_T]) -> None:
-        for it in others:
-            for item in it:
-                if item in self._items:
-                    del self._items[item]
+    async def _rtask(self) -> None:
+        await asyncio.sleep(self.window)
+        await self._reset()
 
 
 class AwaitableValue(Generic[_T]):
