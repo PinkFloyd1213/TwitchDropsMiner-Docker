@@ -113,6 +113,7 @@ URLType = NewType("URLType", str)
 TopicProcess: TypeAlias = "abc.Callable[[int, JsonType], Any]"
 # Values
 MAX_INT = sys.maxsize
+MAX_EXTRA_MINUTES = 15
 BASE_TOPICS = 2
 MAX_WEBSOCKETS = 8
 WS_TOPICS_LIMIT = 50
@@ -125,7 +126,7 @@ DEFAULT_LANG = "English"
 PING_INTERVAL = timedelta(minutes=3)
 PING_TIMEOUT = timedelta(seconds=10)
 ONLINE_DELAY = timedelta(seconds=120)
-WATCH_INTERVAL = timedelta(seconds=20)
+WATCH_INTERVAL = timedelta(seconds=59)
 # Strings
 WINDOW_TITLE = f"Twitch Drops Miner v{__version__} (by DevilXD)"
 # Logging
@@ -164,7 +165,7 @@ class ClientType:
         "kimne78kx3ncx6brgo4mv6wki5h1ko",
         (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
         ),
     )
     MOBILE_WEB = ClientInfo(
@@ -174,49 +175,75 @@ class ClientType:
             # Chrome versioning is done fully on android only,
             # other platforms only use the major version
             (
-                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
+                "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/138.0.7204.158 Mobile Safari/537.36"
             ),
             (
-                "Mozilla/5.0 (Linux; Android 13; SM-A205U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
+                "Mozilla/5.0 (Linux; Android 16; SM-A205U) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/138.0.7204.158 Mobile Safari/537.36"
             ),
             (
-                "Mozilla/5.0 (Linux; Android 13; SM-A102U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
+                "Mozilla/5.0 (Linux; Android 16; SM-A102U) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/138.0.7204.158 Mobile Safari/537.36"
             ),
             (
-                "Mozilla/5.0 (Linux; Android 13; SM-G960U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
+                "Mozilla/5.0 (Linux; Android 16; SM-G960U) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/138.0.7204.158 Mobile Safari/537.36"
             ),
             (
-                "Mozilla/5.0 (Linux; Android 13; SM-N960U) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
+                "Mozilla/5.0 (Linux; Android 16; SM-N960U) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/138.0.7204.158 Mobile Safari/537.36"
             ),
             (
-                "Mozilla/5.0 (Linux; Android 13; LM-Q720) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
+                "Mozilla/5.0 (Linux; Android 16; LM-Q720) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/138.0.7204.158 Mobile Safari/537.36"
             ),
             (
-                "Mozilla/5.0 (Linux; Android 13; LM-X420) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/136.0.7103.60 Mobile Safari/537.36"
+                "Mozilla/5.0 (Linux; Android 16; LM-X420) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/138.0.7204.158 Mobile Safari/537.36"
             ),
         ]
     )
     ANDROID_APP = ClientInfo(
         URL("https://www.twitch.tv"),
         "kd1unb4b3q4t58fwlpcbzcbnm76a8fp",
-        (
-            "Dalvik/2.1.0 (Linux; U; Android 7.1.2; SM-G977N Build/LMY48Z) "
-            "tv.twitch.android.app/16.8.1/1608010"
-        ),
+        [
+            (
+                "Dalvik/2.1.0 (Linux; U; Android 16; SM-S911B Build/TP1A.220624.014) "
+                "tv.twitch.android.app/25.3.0/2503006"
+            ),
+            (
+                "Dalvik/2.1.0 (Linux; U; Android 16; SM-S938B Build/BP2A.250605.031) "
+                "tv.twitch.android.app/25.3.0/2503006"
+            ),
+            (
+                "Dalvik/2.1.0 (Linux; Android 16; SM-X716N Build/UP1A.231005.007) "
+                "tv.twitch.android.app/25.3.0/2503006"
+            ),
+            (
+                "Dalvik/2.1.0 (Linux; U; Android 15; SM-G990B Build/AP3A.240905.015.A2) "
+                "tv.twitch.android.app/25.3.0/2503006"
+            ),
+            (
+                "Dalvik/2.1.0 (Linux; U; Android 15; SM-G970F Build/AP3A.241105.008) "
+                "tv.twitch.android.app/25.3.0/2503006"
+            ),
+            (
+                "Dalvik/2.1.0 (Linux; U; Android 15; SM-A566E Build/AP3A.240905.015.A2) "
+                "tv.twitch.android.app/25.3.0/2503006"
+            ),
+            (
+                "Dalvik/2.1.0 (Linux; U; Android 14; SM-X306B Build/UP1A.231005.007) "
+                "tv.twitch.android.app/25.3.0/2503006"
+            ),
+        ]
     )
     SMARTBOX = ClientInfo(
         URL("https://android.tv.twitch.tv"),
         "ue6666qo983tsx6so1t0vnawi233wa",
         (
             "Mozilla/5.0 (Linux; Android 7.1; Smart Box C1) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
         ),
     )
 
@@ -302,7 +329,7 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
     # returns all in-progress campaigns
     "Inventory": GQLOperation(
         "Inventory",
-        "09acb7d3d7e605a92bdfdcc465f6aa481b71c234d8686a9ba38ea5ed51507592",
+        "d86775d0ef16a63a33ad52e80eaff963b2d5b72fada7c991504a57496e1d8e4b",
         variables={
             "fetchRewardCampaigns": False,
         }
@@ -336,7 +363,7 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
     # returns drops available for a particular channel
     "AvailableDrops": GQLOperation(
         "DropsHighlightService_AvailableDrops",
-        "9a62a09bce5b53e26e64a671e530bc599cb6aab1e5ba3cbd5d85966d3940716f",
+        "782dad0f032942260171d2d80a654f88bdd0c5a9dddc392e9bc92218a0f42d20",
         variables={
             "channelID": ...,  # channel ID as a str
         },
@@ -357,12 +384,12 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
     # returns live channels for a particular game
     "GameDirectory": GQLOperation(
         "DirectoryPage_Game",
-        "c7c9d5aad09155c4161d2382092dc44610367f3536aac39019ec2582ae5065f9",
+        "76cb069d835b8a02914c08dc42c421d0dafda8af5b113a3f19141824b901402f",
         variables={
             "limit": 30,  # limit of channels returned
             "slug": ...,  # game slug
             "imageWidth": 50,
-            "includeIsDJ": False,
+            "includeCostreaming": False,
             "options": {
                 "broadcasterLanguages": [],
                 "freeformTags": None,
@@ -373,7 +400,6 @@ GQL_OPERATIONS: dict[str, GQLOperation] = {
                 "tags": [],
                 "requestID": "JIRA-VXP-2397",
             },
-            "includeIsDJ": False,
             "sortTypeIsRecency": False,
         },
     ),
