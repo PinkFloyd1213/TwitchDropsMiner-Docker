@@ -27,4 +27,7 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV DISPLAY=:1
+
+EXPOSE 6080
+
 ENTRYPOINT ["/entrypoint.sh"]
