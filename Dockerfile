@@ -4,7 +4,7 @@ WORKDIR /usr/src/app
 
 RUN apt-get update && apt-get install -y \
     libgirepository1.0-dev libcairo2-dev pkg-config python3-dev \
-    libgtk-3-0 dbus-x11 libcanberra-gtk-module \
+    libgtk-3-0 dbus-x11 libcanberra-gtk3-module \
     x11vnc xvfb fluxbox wget unzip curl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
