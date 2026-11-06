@@ -76,9 +76,26 @@ Mount `/data` as a volume (see above) so your login session and settings survive
 
 ## 🔑 Login
 
-The miner logs in through a real browser window (Chromium, included in the image). When asked to log in, open the web VNC page: a Chromium window shows the Twitch login page. Log in there, and the window closes by itself once the miner got its token.
+The miner logs in through a real browser window (Chromium, included in the image). When a login is needed, open the web VNC page: a Chromium window shows the Twitch login page.
 
 The browser only opens when a login is needed: once logged in, the session is restored from `cookies.jar` on every restart. If you close the browser window yourself, it does not reopen until you press the `Login` button.
+
+### "Your browser is not currently supported"
+
+Twitch's anti-bot protection rejects logins made from the Chromium running inside the container, even with the right username and password. Log in from the browser on your own computer instead, and hand the result over to the miner:
+
+1. On your computer, in your usual browser (Chrome, Firefox, Edge...), open this address. It is the same login page the miner uses:
+
+   ```
+   https://www.twitch.tv/login?client_id=kd1unb4b3q4t58fwlpcbzcbnm76a8fp&redirect_params=client_id%3Dkd1unb4b3q4t58fwlpcbzcbnm76a8fp%26redirect_uri%3Dhttps%253A%252F%252Fwww.twitch.tv%252F%26response_type%3Dtoken
+   ```
+
+2. Log in. Twitch then sends you to an address that looks like `https://www.twitch.tv/#access_token=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`. Copy the whole address from the address bar. If it disappears before you can copy it, find it in your browser history (`Ctrl+H`).
+3. In the web VNC page, click the address bar of the container's Chromium, paste the address and press `Enter`. To paste, put the text in the clipboard panel of the noVNC side menu, then press `Ctrl+V` in Chromium. You can also type it: the token is about 30 characters long.
+4. The miner picks up the token, closes Chromium by itself and logs in. The session is then kept in `/data/cookies.jar`.
+
+> [!WARNING]
+> This token gives full access to your Twitch account. Never paste it anywhere other than the container's browser.
 
 ---
 
