@@ -20,8 +20,11 @@ from datetime import datetime, timedelta, timezone
 from tkinter import Tk, ttk, StringVar, DoubleVar, IntVar
 from typing import Any, Union, Tuple, TypedDict, NoReturn, Generic, TYPE_CHECKING
 
-if sys.platform == "win32":
+try:
     import pystray
+except ImportError:
+    # Docker version - no system tray in the container
+    pystray = None
 from yarl import URL
 from PIL.ImageTk import PhotoImage
 from PIL import Image as Image_module
@@ -1095,8 +1098,8 @@ class TrayIcon:
         self._icon_state: str = "pickaxe"
         self._button = ttk.Button(master, command=self.minimize, text=_("gui", "tray", "minimize"))
 
-        # Hides Tray button for macOS
-        if sys.platform != "darwin":
+        # Hides Tray button for macOS, and when there is no tray available
+        if sys.platform != "darwin" and pystray is not None:
             self._button.grid(column=0, row=0, sticky="ne")
 
     def __del__(self) -> None:
@@ -1163,7 +1166,7 @@ class TrayIcon:
         self._manager.close()
 
     def minimize(self):
-        if sys.platform == "darwin":
+        if sys.platform == "darwin" or pystray is None:
             return
         if self.icon is None:
             self._start()
@@ -2340,7 +2343,7 @@ class GUIManager:
             self._orig_theme_name = ''
         self.apply_theme(self._twitch.settings.dark_mode)
         # stay hidden in tray if needed, otherwise show the window when everything's ready
-        if self._twitch.settings.tray and sys.platform != "darwin":
+        if self._twitch.settings.tray and sys.platform != "darwin" and pystray is not None:
             # NOTE: this starts the tray icon thread
             self._root.after_idle(self.tray.minimize)
         else:
