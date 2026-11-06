@@ -5,6 +5,8 @@ This is an unofficial Dockerized fork of **TwitchDropsMiner**, enhanced with a b
 📦 Available on Docker Hub:
 👉 [pinkfloyd1213/twitch\_drop\_miner](https://hub.docker.com/r/pinkfloyd1213/twitch_drop_miner)
 
+🔄 The image is rebuilt automatically on every change to this repository, and every week to pick up security updates (Chromium, Debian).
+
 ✅ This image is **multi-architecture** and works on both **amd64** (PCs, servers) and **arm64** (Raspberry Pi, NAS, etc.) systems.
 
 ---
