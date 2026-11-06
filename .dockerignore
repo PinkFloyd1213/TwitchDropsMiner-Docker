@@ -1,0 +1,16 @@
+.git
+.github
+.vscode
+data
+appimage
+*.bat
+build.sh
+build.spec
+setup_env.sh
+manual.txt
+README.md
+docker-compose.yml
+cookies.jar
+settings.json
+log.txt
+cache

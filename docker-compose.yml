@@ -1,13 +1,15 @@
 services:
   twitch_miner:
-    build:
-      context: .
-      platform: linux/amd64 # Or linux/arm64
+    build: .
     container_name: twitch_miner_webvnc
     ports:
       - "6080:6080"
     environment:
-      - VNC_PASSWORD=secret
+      - VNC_PASSWORD=secret # 8 characters max
     volumes:
       - ./data:/data # cookies.jar, settings.json, cache, log.txt
     restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"

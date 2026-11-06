@@ -1,20 +1,40 @@
 #!/bin/bash
 
-mkdir -p ~/.vnc
-
-if [ ! -f ~/.vnc/passwd ]; then
-  x11vnc -storepasswd "$VNC_PASSWORD" ~/.vnc/passwd
+VNC_PASSWORD="${VNC_PASSWORD:-twitch_miner}"
+if [ ${#VNC_PASSWORD} -gt 8 ]; then
+  echo "Warning: VNC only uses the first 8 characters of VNC_PASSWORD (\"${VNC_PASSWORD:0:8}\")" >&2
 fi
 
-rm -f /tmp/.X1-lock
+# Recréé à chaque démarrage, pour qu'un changement de VNC_PASSWORD soit pris en compte
+mkdir -p ~/.vnc
+x11vnc -storepasswd "$VNC_PASSWORD" ~/.vnc/passwd >/dev/null 2>&1
 
-Xvfb :1 -screen 0 1024x768x16 &
-sleep 2
+rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
 
-fluxbox &
-x11vnc -display :1 -forever -usepw -shared -rfbport 5900 &
-/opt/novnc/utils/novnc_proxy --vnc localhost:5900 --listen 6080 &
+Xvfb :1 -screen 0 1280x800x24 -nolisten tcp &
+# attendre que le serveur X soit prêt
+for _ in $(seq 50); do
+  [ -S /tmp/.X11-unix/X1 ] && break
+  sleep 0.1
+done
 
-export DISPLAY=:1
+fluxbox >/dev/null 2>&1 &
+
+# x11vnc et websockify sont relancés s'ils s'arrêtent : l'accès web ne reste jamais bloqué
+(
+  while true; do
+    x11vnc -display :1 -forever -shared -usepw -localhost -rfbport 5900 -quiet
+    echo "x11vnc stopped, restarting..." >&2
+    sleep 2
+  done
+) &
+(
+  cd /opt/websockify || exit 1
+  while true; do
+    python -m websockify --web /opt/novnc 6080 localhost:5900 >/dev/null 2>&1
+    echo "websockify stopped, restarting..." >&2
+    sleep 2
+  done
+) &
+
 exec python main.py
-

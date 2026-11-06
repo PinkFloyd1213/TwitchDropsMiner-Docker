@@ -18,13 +18,13 @@ To use this Dockerized version, make sure you have Docker installed. Optionally,
 ```bash
 git clone https://github.com/PinkFloyd1213/TwitchDropsMiner-Docker.git
 cd TwitchDropsMiner-Docker
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 Then open in your browser:
 
 ```
-http://<your-host-ip>:6080/vnc.html
+http://<your-host-ip>:6080/
 ```
 
 🔐 **Default VNC password:** `secret` (can be changed in `docker-compose.yml`)
@@ -50,13 +50,13 @@ docker run -d \
   twitch_drop_miner
 ```
 
-Access the GUI at: `http://<your-host-ip>:6080/vnc.html`
+Access the GUI at: `http://<your-host-ip>:6080/`
 
 ---
 
 ## 🌍 Access from Browser
 
-* URL: `http://<your-nas-ip>:6080/vnc.html`
+* URL: `http://<your-nas-ip>:6080/` (connects automatically, scales the screen to your window, and reconnects by itself if the connection drops)
 * Use the password set in `VNC_PASSWORD`
 
 ---
@@ -65,7 +65,7 @@ Access the GUI at: `http://<your-host-ip>:6080/vnc.html`
 
 | Variable       | Description                            | Default        |
 | -------------- | -------------------------------------- | -------------- |
-| `VNC_PASSWORD` | Password to access the VNC GUI session | `twitch_miner` |
+| `VNC_PASSWORD` | Password to access the VNC GUI session (VNC only uses the first 8 characters) | `twitch_miner` |
 | `TDM_DATA_DIR` | Folder where `cookies.jar`, `settings.json`, the cache and `log.txt` are stored | `/data` |
 
 Mount `/data` as a volume (see above) so your login session and settings survive container rebuilds and updates.
@@ -75,6 +75,8 @@ Mount `/data` as a volume (see above) so your login session and settings survive
 ## 🔑 Login
 
 The miner logs in through a real browser window (Chromium, included in the image). When asked to log in, open the web VNC page: a Chromium window shows the Twitch login page. Log in there, and the window closes by itself once the miner got its token.
+
+The browser only opens when a login is needed: once logged in, the session is restored from `cookies.jar` on every restart. If you close the browser window yourself, it does not reopen until you press the `Login` button.
 
 ---
 
@@ -91,7 +93,7 @@ The miner logs in through a real browser window (Chromium, included in the image
 ## 📝 Notes
 
 * This is an **unofficial** project and is not affiliated with the original TwitchDropsMiner.
-* GUI support is powered by Xvfb, Fluxbox, x11vnc, and noVNC.
+* GUI support is powered by Xvfb, Fluxbox, x11vnc, and noVNC. x11vnc and websockify are restarted automatically if they ever stop, and a Docker health check reports whether the web VNC is reachable.
 * Ideal for NAS or headless servers where GUI access via browser is preferred.
 * Works on both amd64 and arm64 systems.
 
