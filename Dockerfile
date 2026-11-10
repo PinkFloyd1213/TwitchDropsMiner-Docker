@@ -43,6 +43,7 @@ RUN grep -v PyGObject requirements.txt > /tmp/requirements.txt \
 
 COPY --from=novnc /opt/novnc /opt/novnc
 COPY --from=novnc /opt/websockify /opt/websockify
+COPY docker/novnc_server.py /opt/websockify/novnc_server.py
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 
 COPY . .

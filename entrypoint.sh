@@ -31,7 +31,7 @@ fluxbox >/dev/null 2>&1 &
 (
   cd /opt/websockify || exit 1
   while true; do
-    python -m websockify --web /opt/novnc 6080 localhost:5900 >/dev/null 2>&1
+    python novnc_server.py --web /opt/novnc 6080 localhost:5900 >/dev/null 2>&1
     echo "websockify stopped, restarting..." >&2
     sleep 2
   done
